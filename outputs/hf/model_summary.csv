@@ -1,0 +1,3 @@
+model_name,mean_surface_inflation,max_bias_dimension,max_bias_delta,exploitability_ratio,mean_instability_rate
+OpenAssistant/reward-model-electra-large-discriminator,-3.4757,exploit_search,-5.5857,1.5111,0.1
+OpenAssistant/reward-model-deberta-v3-base,-1.6317,length,-2.6536,1.4159,0.1

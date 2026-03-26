@@ -40,3 +40,19 @@ def make_sycophancy_plot(summary: pd.DataFrame, output_dir: Path) -> Path:
     fig.savefig(path, dpi=220, bbox_inches="tight")
     plt.close(fig)
     return path
+
+
+def make_instability_plot(model_summary: pd.DataFrame, output_dir: Path) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    subset = model_summary.sort_values("mean_instability_rate", ascending=False)
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    ax.bar(subset["model_name"], subset["mean_instability_rate"], color=["#7c3aed", "#0f766e", "#c2410c"])
+    ax.set_title("Ranking Instability Under Surface-Form Perturbations")
+    ax.set_ylabel("Mean instability rate")
+    ax.set_ylim(0, 1.05)
+    ax.grid(axis="y", alpha=0.25)
+    fig.tight_layout()
+    path = output_dir / "instability_profile.png"
+    fig.savefig(path, dpi=220, bbox_inches="tight")
+    plt.close(fig)
+    return path

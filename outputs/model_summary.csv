@@ -1,0 +1,4 @@
+model_name,mean_surface_inflation,max_bias_dimension,max_bias_delta,exploitability_ratio,mean_instability_rate
+rm_benchmark_top,0.3682,exploit_search,1.475,7.94,0.95
+rm_small,0.2522,exploit_search,0.935,6.642,0.906
+rm_instruct,0.1872,exploit_search,0.705,6.4692,0.86
