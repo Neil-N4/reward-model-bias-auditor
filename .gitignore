@@ -1,0 +1,11 @@
+.DS_Store
+.pytest_cache/
+.mplconfig/
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+outputs/pairs.csv
+outputs/scores.csv
+outputs/summary.csv
+outputs/report.md
