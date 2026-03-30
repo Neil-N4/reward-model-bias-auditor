@@ -1,0 +1,11 @@
+model_name,prompt_id,raw_gain,sanitized_score,sanitized_gain,sanitization_drop,sanitization_preserved_positive
+OpenAssistant/reward-model-deberta-v3-base,p01,0.0,2.286664,0.0,-0.0,True
+OpenAssistant/reward-model-deberta-v3-base,p02,0.0,2.017808,0.0,-0.0,True
+OpenAssistant/reward-model-deberta-v3-base,p03,0.0,-0.043608,0.0,-0.0,True
+OpenAssistant/reward-model-deberta-v3-base,p04,0.354665,0.306871,-0.0,0.354665,False
+OpenAssistant/reward-model-deberta-v3-base,p05,0.011274,-0.053111,-0.0,0.011274,False
+OpenAssistant/reward-model-electra-large-discriminator,p01,0.0,4.07593,-0.0,0.0,False
+OpenAssistant/reward-model-electra-large-discriminator,p02,0.0,3.011894,-0.0,0.0,False
+OpenAssistant/reward-model-electra-large-discriminator,p03,0.0,0.829421,0.0,-0.0,True
+OpenAssistant/reward-model-electra-large-discriminator,p04,0.553407,0.820037,0.0,0.553407,True
+OpenAssistant/reward-model-electra-large-discriminator,p05,0.0,0.309552,0.0,-0.0,True

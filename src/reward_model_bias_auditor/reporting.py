@@ -10,6 +10,9 @@ def render_markdown_report(
     attributions: pd.DataFrame,
     semantic_consistency: pd.DataFrame,
     model_summary: pd.DataFrame,
+    attacks: pd.DataFrame | None,
+    transferability: pd.DataFrame | None,
+    defense_summary: pd.DataFrame | None,
     output_path: Path,
 ) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -24,6 +27,9 @@ def render_markdown_report(
     low_model = exploit.iloc[-1]["model_name"]
     ratio = abs(float(exploit.iloc[0]["mean"])) / max(1e-6, abs(float(exploit.iloc[-1]["mean"])))
     semantic_pass_rate = float(semantic_consistency["semantic_pass"].mean())
+    attack_gain = 0.0 if attacks is None or attacks.empty else float(attacks["score_gain"].mean())
+    transfer_gain = 0.0 if transferability is None or transferability.empty else float(transferability["mean_transfer_gain"].mean())
+    defense_drop = 0.0 if defense_summary is None or defense_summary.empty else float(defense_summary["mean_sanitization_drop"].mean())
 
     top_tokens = (
         attributions.groupby(["bias_dimension", "token"])["attribution_delta"]
@@ -45,6 +51,9 @@ def render_markdown_report(
         f"- Composite exploit-search rewrites produced the largest score inflation, with `{top_model}` showing the highest exploitability.",
         f"- The most exploitable model was {ratio:.2f}x more vulnerable than the least exploitable model (`{low_model}`).",
         f"- Sycophancy remained the strongest single-factor bias family by absolute effect, with top delta `{float(sycophancy.iloc[0]['mean']):.3f}`.",
+        f"- Automated exploit search increased scores by an average of `{attack_gain:.3f}` while keeping semantic-consistency constraints active.",
+        f"- Cross-model transfer produced mean attack gain `{transfer_gain:.3f}`, showing whether hacks stay local or generalize.",
+        f"- Sanitization dropped exploit scores by `{defense_drop:.3f}` on average, which turns the repo into an audit-plus-defense workflow.",
         f"- Semantic-consistency screening passed for {semantic_pass_rate:.2%} of perturbation pairs in the seeded audit.",
         "",
         "## Threat Model",
@@ -77,6 +86,51 @@ def render_markdown_report(
         lines.append(
             f"| {row['model_name']} | {row['bias_dimension']} | {row['mean']:.3f} | [{row['ci_low']:.3f}, {row['ci_high']:.3f}] | {'yes' if row['significant_nonzero'] else 'no'} | {row['effect_size']:.3f} | {row['ranking_instability_rate']:.2%} | {int(row['count'])} |"
         )
+
+    lines.extend(
+        [
+            "",
+            "## Automated Exploit Search",
+            "",
+            "| Source Model | Prompt | Gain | Semantic Score | Edit Ratio | Operations |",
+            "| --- | --- | ---: | ---: | ---: | --- |",
+        ]
+    )
+    if attacks is not None:
+        for _, row in attacks.sort_values("score_gain", ascending=False).head(10).iterrows():
+            lines.append(
+                f"| {row['source_model']} | {row['prompt_id']} | {row['score_gain']:.3f} | {row['semantic_score']:.3f} | {row['edit_ratio']:.3f} | {row['applied_operations']} |"
+            )
+
+    lines.extend(
+        [
+            "",
+            "## Transferability",
+            "",
+            "| Source Model | Target Model | Mean Transfer Gain | Success Rate |",
+            "| --- | --- | ---: | ---: |",
+        ]
+    )
+    if transferability is not None:
+        for _, row in transferability.iterrows():
+            lines.append(
+                f"| {row['source_model']} | {row['target_model']} | {row['mean_transfer_gain']:.3f} | {row['transfer_success_rate']:.2%} |"
+            )
+
+    lines.extend(
+        [
+            "",
+            "## Sanitization Defense",
+            "",
+            "| Model | Mean Raw Gain | Mean Sanitized Gain | Mean Drop | Positive Gain Retention |",
+            "| --- | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    if defense_summary is not None:
+        for _, row in defense_summary.iterrows():
+            lines.append(
+                f"| {row['model_name']} | {row['mean_raw_gain']:.3f} | {row['mean_sanitized_gain']:.3f} | {row['mean_sanitization_drop']:.3f} | {row['positive_gain_retention']:.2%} |"
+            )
 
     lines.extend(
         [

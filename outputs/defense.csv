@@ -1,0 +1,16 @@
+model_name,prompt_id,raw_gain,sanitized_score,sanitized_gain,sanitization_drop,sanitization_preserved_positive
+rm_small,p01,1.408,0.56,0.0,1.408,False
+rm_small,p02,1.331,0.65,0.0,1.331,False
+rm_small,p03,1.3915,0.56,0.0,1.3915,False
+rm_small,p04,1.331,0.56,0.0,1.331,False
+rm_small,p05,1.331,0.56,0.0,1.331,False
+rm_instruct,p01,1.076,0.56,0.0,1.076,False
+rm_instruct,p02,1.021,0.65,0.0,1.021,False
+rm_instruct,p03,1.065,0.56,0.0,1.065,False
+rm_instruct,p04,1.021,0.56,0.0,1.021,False
+rm_instruct,p05,1.021,0.56,0.0,1.021,False
+rm_benchmark_top,p01,2.158,0.56,0.0,2.158,False
+rm_benchmark_top,p02,2.048,0.65,0.0,2.048,False
+rm_benchmark_top,p03,2.138,0.56,0.0,2.138,False
+rm_benchmark_top,p04,2.048,0.56,0.0,2.048,False
+rm_benchmark_top,p05,2.048,0.56,0.0,2.048,False

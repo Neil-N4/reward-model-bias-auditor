@@ -11,8 +11,24 @@ def load_hf_reward_model(model_name: str) -> tuple[object, object]:
     except ImportError as exc:
         raise RuntimeError("Install the optional 'huggingface' dependencies to use HuggingFace scoring.") from exc
 
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForSequenceClassification.from_pretrained(model_name)
+    tokenizer = None
+    tokenizer_attempts = (
+        {"local_files_only": True, "use_fast": False},
+        {"local_files_only": True},
+        {"use_fast": False},
+        {},
+    )
+    last_exc: Exception | None = None
+    for kwargs in tokenizer_attempts:
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(model_name, **kwargs)
+            break
+        except Exception as exc:  # pragma: no cover - fallback path depends on local env
+            last_exc = exc
+    if tokenizer is None:
+        raise RuntimeError(f"Failed to load tokenizer for {model_name}: {last_exc}") from last_exc
+
+    model = AutoModelForSequenceClassification.from_pretrained(model_name, local_files_only=True)
     model.eval()
     return tokenizer, model
 
@@ -63,3 +79,27 @@ def score_pairs_with_hf(
         )
 
     return tuple(results)
+
+
+def score_text_with_hf(
+    task: str,
+    response: str,
+    model_name: str,
+    max_length: int = 512,
+    model_bundle: tuple[object, object] | None = None,
+) -> float:
+    try:
+        import torch
+    except ImportError as exc:
+        raise RuntimeError("Install PyTorch to run HuggingFace reward-model scoring.") from exc
+
+    tokenizer, model = model_bundle or load_hf_reward_model(model_name)
+    with torch.no_grad():
+        inputs = tokenizer(
+            task,
+            response,
+            return_tensors="pt",
+            truncation=True,
+            max_length=max_length,
+        )
+        return float(model(**inputs).logits.squeeze().cpu().item())

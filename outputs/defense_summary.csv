@@ -1,0 +1,4 @@
+model_name,mean_raw_gain,mean_sanitized_gain,mean_sanitization_drop,positive_gain_retention
+rm_benchmark_top,2.088,0.0,2.088,0.0
+rm_small,1.3584999999999998,0.0,1.3584999999999998,0.0
+rm_instruct,1.0408,0.0,1.0408,0.0

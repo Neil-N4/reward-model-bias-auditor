@@ -3,10 +3,12 @@ from __future__ import annotations
 import math
 import random
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 
 import pandas as pd
 
+from .attack import AttackRecord
+from .defense import sanitize_response
 from .models import PairScore, PerturbationPair
 
 
@@ -128,6 +130,103 @@ def build_model_summary(summary: pd.DataFrame) -> pd.DataFrame:
             }
         )
     return pd.DataFrame(model_rows).sort_values("exploitability_ratio", ascending=False).reset_index(drop=True)
+
+
+def build_attack_frame(records: Iterable[AttackRecord]) -> pd.DataFrame:
+    rows = []
+    for record in records:
+        rows.append(
+            {
+                "source_model": record.source_model,
+                "prompt_id": record.prompt_id,
+                "task": record.task,
+                "search_steps": record.search_steps,
+                "semantic_score": record.semantic_score,
+                "edit_ratio": record.edit_ratio,
+                "base_text": record.base_text,
+                "base_score": record.base_score,
+                "best_score": record.best_score,
+                "score_gain": record.score_gain,
+                "applied_operations": ",".join(record.applied_operations),
+                "best_text": record.best_text,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def build_transferability_frame(
+    attacks: pd.DataFrame,
+    score_text: Callable[[str, str, str], float],
+) -> pd.DataFrame:
+    rows = []
+    for source_model, subset in attacks.groupby("source_model"):
+        for target_model in sorted(attacks["source_model"].unique()):
+            gains = []
+            for _, row in subset.iterrows():
+                base_score = score_text(target_model, row["task"], row["base_text"])
+                attacked_score = score_text(target_model, row["task"], row["best_text"])
+                gains.append(float(attacked_score - base_score))
+            mean_gain = sum(gains) / len(gains) if gains else 0.0
+            success_rate = sum(gain > 0 for gain in gains) / len(gains) if gains else 0.0
+            rows.append(
+                {
+                    "source_model": source_model,
+                    "target_model": target_model,
+                    "mean_transfer_gain": round(mean_gain, 6),
+                    "transfer_success_rate": round(success_rate, 4),
+                }
+            )
+    return pd.DataFrame(rows).sort_values(["source_model", "mean_transfer_gain"], ascending=[True, False]).reset_index(drop=True)
+
+
+def build_defense_frame(
+    attacks: pd.DataFrame,
+    score_text: Callable[[str, str, str], float],
+) -> pd.DataFrame:
+    rows = []
+    for _, row in attacks.iterrows():
+        sanitized = sanitize_response(row["best_text"])
+        sanitized_score = score_text(row["source_model"], row["task"], sanitized)
+        raw_gain = float(row["best_score"] - row["base_score"])
+        sanitized_gain = float(sanitized_score - row["base_score"])
+        rows.append(
+            {
+                "model_name": row["source_model"],
+                "prompt_id": row["prompt_id"],
+                "raw_gain": round(raw_gain, 6),
+                "sanitized_score": round(float(sanitized_score), 6),
+                "sanitized_gain": round(sanitized_gain, 6),
+                "sanitization_drop": round(float(row["best_score"] - sanitized_score), 6),
+                "sanitization_preserved_positive": sanitized_gain > 0,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def build_defense_summary(defense_frame: pd.DataFrame) -> pd.DataFrame:
+    if defense_frame.empty:
+        return pd.DataFrame(
+            columns=[
+                "model_name",
+                "mean_raw_gain",
+                "mean_sanitized_gain",
+                "mean_sanitization_drop",
+                "positive_gain_retention",
+            ]
+        )
+    summary = (
+        defense_frame.groupby("model_name")
+        .agg(
+            mean_raw_gain=("raw_gain", "mean"),
+            mean_sanitized_gain=("sanitized_gain", "mean"),
+            mean_sanitization_drop=("sanitization_drop", "mean"),
+            positive_gain_retention=("sanitization_preserved_positive", "mean"),
+        )
+        .reset_index()
+    )
+    for column in ("mean_raw_gain", "mean_sanitized_gain", "mean_sanitization_drop", "positive_gain_retention"):
+        summary[column] = summary[column].astype(float)
+    return summary.sort_values("mean_sanitization_drop", ascending=False).reset_index(drop=True)
 
 
 def build_attribution_frame(scores: Iterable[PairScore]) -> pd.DataFrame:

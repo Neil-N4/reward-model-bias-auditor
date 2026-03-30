@@ -1,0 +1,3 @@
+model_name,mean_raw_gain,mean_sanitized_gain,mean_sanitization_drop,positive_gain_retention
+OpenAssistant/reward-model-electra-large-discriminator,0.1106814,0.0,0.1106814,0.6
+OpenAssistant/reward-model-deberta-v3-base,0.0731878,0.0,0.0731878,0.6

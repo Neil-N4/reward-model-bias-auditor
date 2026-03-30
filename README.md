@@ -2,7 +2,7 @@
 
 Reward models can be exploited without changing the underlying answer.
 
-This repository is an evals-style framework for auditing reward-model robustness under **semantic-preserving rewrites**. It starts from a fixed response, applies controlled perturbations or composite reward-hacking rewrites, and measures when reward models change their preferences for the wrong reasons.
+This repository is an evals-style framework for auditing reward-model robustness under **semantic-preserving rewrites**. It starts from a fixed response, applies controlled perturbations, runs an automated reward-hacking search loop, and measures when reward models change their preferences for the wrong reasons.
 
 The project is designed around the kinds of failure modes that matter in post-training and preference-model deployment:
 
@@ -13,6 +13,8 @@ The project is designed around the kinds of failure modes that matter in post-tr
 - refusal/safety-style distortion
 - ranking instability under semantically equivalent rewrites
 - composite reward-hacking exploitability
+- cross-model exploit transfer
+- preference-signal collapse under input sanitization
 
 ## What This Evaluates
 
@@ -30,6 +32,8 @@ The benchmark currently audits ten perturbation families:
 - `exploit_search`
 
 The `exploit_search` family is the most important one: it composes multiple high-reward surface cues into a single semantically preserving rewrite to test whether a model can be systematically “reward hacked.”
+
+On top of that fixed benchmark, the repo now includes a black-box search loop that incrementally applies rewrite operators and keeps only candidates that improve reward score while preserving semantic overlap.
 
 ## Headline Finding
 
@@ -50,6 +54,10 @@ This is the core thesis of the repo:
 ![Sycophancy profile](docs/images/sycophancy_profile.png)
 
 ![Instability profile](docs/images/instability_profile.png)
+
+![Transferability matrix](docs/images/transferability_matrix.png)
+
+![Sanitization defense](docs/images/sanitization_drop.png)
 
 ## Why This Is Scale-Aligned
 
@@ -84,6 +92,9 @@ The main outputs are:
 - `exploitability_ratio`
 - `semantic_overlap_min`
 - `semantic_pass_rate`
+- `mean_transfer_gain`
+- `transfer_success_rate`
+- `mean_sanitization_drop`
 
 These metrics are meant to answer different questions:
 
@@ -92,6 +103,8 @@ These metrics are meant to answer different questions:
 - Is it consistent enough to flip rankings?
 - Can multiple benign-looking cues be combined into a stronger exploit?
 - Did the rewrites preserve content well enough to make the result meaningful?
+- Do attacks found on one reward model transfer to another?
+- Does normalization remove the inflated preference signal?
 
 ## System Design
 
@@ -107,9 +120,15 @@ flowchart LR
     F --> H["Model Summary<br/>exploitability ratio + strongest bias"]
     C --> I["Semantic Consistency Gate"]
     D --> I
+    A --> K["Automated Attack Search"]
+    K --> L["Best Exploit Per Prompt"]
+    L --> M["Transferability Matrix"]
+    L --> N["Sanitization Defense"]
     G --> J["Markdown Report + Plots"]
     H --> J
     I --> J
+    M --> J
+    N --> J
 ```
 
 ## Current Benchmark Shape
@@ -136,14 +155,17 @@ These are intentionally configured so that:
 - stronger models are not automatically more robust
 - exploit-search is more powerful than any single surface cue
 - weaker perturbations do not always destabilize rankings
+- transfer can be non-trivial rather than guaranteed
+- defense layers meaningfully collapse attack gains
 
 ### 2. Real HuggingFace Reward Models
 
 The repo also supports real model scoring through HuggingFace.
 
-Validated path:
+Validated paths:
 
 - `OpenAssistant/reward-model-deberta-v3-base`
+- `OpenAssistant/reward-model-electra-large-discriminator`
 
 ## Quickstart
 
@@ -162,6 +184,10 @@ This writes:
 - `outputs/summary.csv`
 - `outputs/model_summary.csv`
 - `outputs/semantic_consistency.csv`
+- `outputs/attack_search.csv`
+- `outputs/transferability.csv`
+- `outputs/defense.csv`
+- `outputs/defense_summary.csv`
 - `outputs/report.md`
 
 ### Real Reward-Model Audit
@@ -176,6 +202,30 @@ MPLCONFIGDIR=$PWD/.mplconfig python scripts/run_hf_audit.py \
 ```
 
 This writes real-model outputs under `outputs/hf/`.
+
+## Automated Red Teaming
+
+The attack search loop treats the reward model as a black-box objective:
+
+1. start from a canonical answer
+2. apply one rewrite operator at a time
+3. keep the candidate only if reward score improves
+4. reject candidates that violate semantic-overlap or edit-budget thresholds
+5. test the discovered exploit against other reward models
+
+This turns the project from a static benchmark into a lightweight reward-hacking discovery engine.
+
+## Defense Layer
+
+The defense pass sanitizes reward-model inputs before rescoring:
+
+- strips sycophantic agreement cues
+- removes authority and citation markers
+- flattens markdown and list formatting
+- removes overcautious safety preambles
+- compresses verbosity-only additions
+
+If reward gain disappears after sanitization, the original preference was likely driven by surface form rather than substance.
 
 ### Tests
 
@@ -192,12 +242,14 @@ Verified locally:
 - offline seeded audit runs end-to-end
 - semantic-consistency outputs are generated
 - bootstrap CI and model summary tables are generated
+- automated exploit search, transferability, and defense summaries are generated
 - real HuggingFace scoring works with `OpenAssistant/reward-model-deberta-v3-base`
+- real HuggingFace scoring works with `OpenAssistant/reward-model-electra-large-discriminator`
 - test suite passes in the project venv
 
 ## Semantic-Consistency Gate
 
-This repo includes a lightweight semantic consistency check based on lexical overlap with the canonical base response. It is not a full entailment model, but it is enough to keep the benchmark honest about whether a perturbation still resembles the same underlying answer.
+This repo includes a lightweight semantic consistency check based on lexical overlap with the canonical base response plus an edit-budget constraint in the automated search loop. It is not a full entailment model, but it is enough to keep the benchmark honest about whether a perturbation still resembles the same underlying answer.
 
 That gate is important because otherwise reward inflation results are too easy to attack: if the rewrite changed the substance, the benchmark has not isolated a reward-model bias.
 

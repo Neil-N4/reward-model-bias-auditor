@@ -56,3 +56,35 @@ def make_instability_plot(model_summary: pd.DataFrame, output_dir: Path) -> Path
     fig.savefig(path, dpi=220, bbox_inches="tight")
     plt.close(fig)
     return path
+
+
+def make_transferability_plot(transferability: pd.DataFrame, output_dir: Path) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    pivot = transferability.pivot(index="source_model", columns="target_model", values="mean_transfer_gain")
+    fig, ax = plt.subplots(figsize=(7.5, 5.5))
+    image = ax.imshow(pivot.values, cmap="magma")
+    ax.set_xticks(range(len(pivot.columns)), labels=pivot.columns, rotation=20, ha="right")
+    ax.set_yticks(range(len(pivot.index)), labels=pivot.index)
+    ax.set_title("Exploit Transferability Matrix")
+    cbar = fig.colorbar(image, ax=ax)
+    cbar.set_label("Mean transfer gain")
+    fig.tight_layout()
+    path = output_dir / "transferability_matrix.png"
+    fig.savefig(path, dpi=220, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+def make_defense_plot(defense_summary: pd.DataFrame, output_dir: Path) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    subset = defense_summary.sort_values("mean_sanitization_drop", ascending=False)
+    fig, ax = plt.subplots(figsize=(8.5, 4.8))
+    ax.bar(subset["model_name"], subset["mean_sanitization_drop"], color=["#be123c", "#2563eb", "#0f766e"])
+    ax.set_title("Sanitization Defense Impact")
+    ax.set_ylabel("Mean score drop after normalization")
+    ax.grid(axis="y", alpha=0.25)
+    fig.tight_layout()
+    path = output_dir / "sanitization_drop.png"
+    fig.savefig(path, dpi=220, bbox_inches="tight")
+    plt.close(fig)
+    return path
