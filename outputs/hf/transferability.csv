@@ -1,5 +1,5 @@
 source_model,target_model,mean_transfer_gain,transfer_success_rate
-OpenAssistant/reward-model-deberta-v3-base,OpenAssistant/reward-model-deberta-v3-base,0.073188,0.4
-OpenAssistant/reward-model-deberta-v3-base,OpenAssistant/reward-model-electra-large-discriminator,-0.222697,0.2
-OpenAssistant/reward-model-electra-large-discriminator,OpenAssistant/reward-model-electra-large-discriminator,0.110681,0.2
-OpenAssistant/reward-model-electra-large-discriminator,OpenAssistant/reward-model-deberta-v3-base,0.070933,0.2
+OpenAssistant/reward-model-deberta-v3-base,OpenAssistant/reward-model-deberta-v3-base,0.0,0.0
+OpenAssistant/reward-model-deberta-v3-base,OpenAssistant/reward-model-electra-large-discriminator,0.0,0.0
+OpenAssistant/reward-model-electra-large-discriminator,OpenAssistant/reward-model-deberta-v3-base,0.0,0.0
+OpenAssistant/reward-model-electra-large-discriminator,OpenAssistant/reward-model-electra-large-discriminator,0.0,0.0

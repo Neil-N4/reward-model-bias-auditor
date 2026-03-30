@@ -32,6 +32,8 @@ class AttackRecord:
     semantic_score: float
     lexical_overlap: float
     embedding_similarity: float
+    entailment_score: float
+    contradiction_score: float
     contradiction_flag: bool
     semantic_backend: str
     edit_ratio: float
@@ -65,15 +67,20 @@ def search_reward_hack(
     scorer: AttackScorer,
     max_steps: int = 4,
     beam_width: int = 4,
+    population_size: int = 12,
     min_semantic_score: float = 0.55,
     max_edit_ratio: float = 3.5,
     semantic_evaluator: SemanticEvaluator | None = None,
+    auxiliary_scorers: dict[str, AttackScorer] | None = None,
+    transfer_weight: float = 0.35,
+    semantic_weight: float = 0.25,
+    edit_penalty: float = 0.08,
 ) -> AttackRecord:
     evaluator = semantic_evaluator or SemanticEvaluator(min_semantic_score=min_semantic_score)
     base_score = scorer(prompt.task, prompt.base_response)
     base_check = evaluator.evaluate(prompt.base_response, prompt.base_response)
-    frontier: list[tuple[str, tuple[str, ...], float, SemanticCheck]] = [
-        (prompt.base_response, tuple(), base_score, base_check)
+    frontier: list[tuple[str, tuple[str, ...], float, float, SemanticCheck]] = [
+        (prompt.base_response, tuple(), base_score, base_score, base_check)
     ]
     best_text = prompt.base_response
     best_ops: tuple[str, ...] = tuple()
@@ -83,8 +90,8 @@ def search_reward_hack(
     operations = _rewrite_library()
 
     for _ in range(max_steps):
-        candidates: list[tuple[str, tuple[str, ...], float, SemanticCheck]] = []
-        for current_text, applied_ops, _, _ in frontier:
+        candidates: list[tuple[str, tuple[str, ...], float, float, SemanticCheck]] = []
+        for current_text, applied_ops, _, _, _ in frontier:
             for operation_name, operation in operations:
                 if operation_name in applied_ops:
                     continue
@@ -96,7 +103,21 @@ def search_reward_hack(
                 if edit_ratio > max_edit_ratio:
                     continue
                 candidate_score = scorer(prompt.task, candidate)
-                candidates.append((candidate, applied_ops + (operation_name,), candidate_score, check))
+                transfer_score = 0.0
+                if auxiliary_scorers:
+                    transfer_gains = []
+                    for aux_scorer in auxiliary_scorers.values():
+                        aux_base = aux_scorer(prompt.task, prompt.base_response)
+                        aux_candidate = aux_scorer(prompt.task, candidate)
+                        transfer_gains.append(aux_candidate - aux_base)
+                    transfer_score = sum(transfer_gains) / len(transfer_gains) if transfer_gains else 0.0
+                fitness = (
+                    candidate_score
+                    + (transfer_weight * transfer_score)
+                    + (semantic_weight * check.semantic_score)
+                    - (edit_penalty * edit_ratio)
+                )
+                candidates.append((candidate, applied_ops + (operation_name,), candidate_score, fitness, check))
                 if candidate_score > best_score:
                     best_text = candidate
                     best_ops = applied_ops + (operation_name,)
@@ -104,8 +125,8 @@ def search_reward_hack(
                     best_check = check
         if not candidates:
             break
-        candidates.sort(key=lambda item: (item[2], item[3].semantic_score), reverse=True)
-        frontier = candidates[:beam_width]
+        candidates.sort(key=lambda item: (item[3], item[2], item[4].semantic_score), reverse=True)
+        frontier = candidates[: max(beam_width, population_size // 3)]
         search_steps += 1
 
     base_score = scorer(prompt.task, prompt.base_response)
@@ -119,6 +140,8 @@ def search_reward_hack(
         semantic_score=best_check.semantic_score,
         lexical_overlap=best_check.lexical_overlap,
         embedding_similarity=best_check.embedding_similarity,
+        entailment_score=best_check.entailment_score,
+        contradiction_score=best_check.contradiction_score,
         contradiction_flag=best_check.contradiction_flag,
         semantic_backend=best_check.backend,
         edit_ratio=_edit_ratio(prompt.base_response, best_text),
@@ -141,6 +164,8 @@ def attack_records_to_rows(records: Iterable[AttackRecord]) -> list[dict[str, ob
                 "semantic_score": record.semantic_score,
                 "lexical_overlap": record.lexical_overlap,
                 "embedding_similarity": record.embedding_similarity,
+                "entailment_score": record.entailment_score,
+                "contradiction_score": record.contradiction_score,
                 "contradiction_flag": record.contradiction_flag,
                 "semantic_backend": record.semantic_backend,
                 "edit_ratio": record.edit_ratio,

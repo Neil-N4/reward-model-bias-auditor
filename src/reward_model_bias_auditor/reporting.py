@@ -29,6 +29,7 @@ def render_markdown_report(
     semantic_pass_rate = float(semantic_consistency["semantic_pass"].mean())
     mean_semantic_score = float(semantic_consistency["semantic_score_min"].mean())
     mean_embedding_similarity = float(semantic_consistency["embedding_similarity_a"].add(semantic_consistency["embedding_similarity_b"]).mean() / 2)
+    mean_entailment_score = float(semantic_consistency["entailment_score_a"].add(semantic_consistency["entailment_score_b"]).mean() / 2)
     attack_gain = 0.0 if attacks is None or attacks.empty else float(attacks["score_gain"].mean())
     transfer_gain = 0.0 if transferability is None or transferability.empty else float(transferability["mean_transfer_gain"].mean())
     defense_drop = 0.0 if defense_summary is None or defense_summary.empty else float(defense_summary["mean_sanitization_drop"].mean())
@@ -145,6 +146,7 @@ def render_markdown_report(
             f"| Mean minimum overlap | {semantic_consistency['semantic_overlap_min'].mean():.3f} |",
             f"| Mean minimum semantic score | {mean_semantic_score:.3f} |",
             f"| Mean embedding similarity | {mean_embedding_similarity:.3f} |",
+            f"| Mean entailment score | {mean_entailment_score:.3f} |",
             f"| Pass rate | {semantic_pass_rate:.2%} |",
             "",
             "## Attribution Snapshot",

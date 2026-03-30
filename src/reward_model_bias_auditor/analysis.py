@@ -63,6 +63,10 @@ def build_semantic_consistency_frame(
                 "embedding_similarity_b": round(check_b.embedding_similarity, 4),
                 "semantic_score_a": round(check_a.semantic_score, 4),
                 "semantic_score_b": round(check_b.semantic_score, 4),
+                "entailment_score_a": round(check_a.entailment_score, 4),
+                "entailment_score_b": round(check_b.entailment_score, 4),
+                "contradiction_score_a": round(check_a.contradiction_score, 4),
+                "contradiction_score_b": round(check_b.contradiction_score, 4),
                 "contradiction_a": check_a.contradiction_flag,
                 "contradiction_b": check_b.contradiction_flag,
                 "semantic_overlap_min": round(min(check_a.lexical_overlap, check_b.lexical_overlap), 4),
@@ -143,6 +147,8 @@ def build_attack_frame(records: Iterable[AttackRecord]) -> pd.DataFrame:
                 "semantic_score": record.semantic_score,
                 "lexical_overlap": record.lexical_overlap,
                 "embedding_similarity": record.embedding_similarity,
+                "entailment_score": record.entailment_score,
+                "contradiction_score": record.contradiction_score,
                 "contradiction_flag": record.contradiction_flag,
                 "semantic_backend": record.semantic_backend,
                 "edit_ratio": record.edit_ratio,
@@ -197,6 +203,7 @@ def build_defense_frame(
                 "model_name": row["source_model"],
                 "prompt_id": row["prompt_id"],
                 "semantic_backend": row["semantic_backend"],
+                "entailment_score": row["entailment_score"],
                 "raw_gain": round(raw_gain, 6),
                 "sanitized_score": round(float(sanitized_score), 6),
                 "sanitized_gain": round(sanitized_gain, 6),
@@ -227,12 +234,40 @@ def build_defense_summary(defense_frame: pd.DataFrame) -> pd.DataFrame:
             mean_sanitization_drop=("sanitization_drop", "mean"),
             positive_gain_retention=("sanitization_preserved_positive", "mean"),
             mean_sanitized_overlap=("sanitized_overlap", "mean"),
+            mean_entailment_score=("entailment_score", "mean"),
         )
         .reset_index()
     )
     for column in ("mean_raw_gain", "mean_sanitized_gain", "mean_sanitization_drop", "positive_gain_retention"):
         summary[column] = summary[column].astype(float)
     return summary.sort_values("mean_sanitization_drop", ascending=False).reset_index(drop=True)
+
+
+def build_case_study_frame(
+    attacks: pd.DataFrame,
+    transferability: pd.DataFrame,
+    defense_frame: pd.DataFrame,
+    top_k: int = 5,
+) -> pd.DataFrame:
+    if attacks.empty:
+        return pd.DataFrame()
+    transfer_lookup = {
+        row["source_model"]: float(
+            transferability[transferability["source_model"] == row["source_model"]]["mean_transfer_gain"].mean()
+        )
+        for _, row in attacks[["source_model"]].drop_duplicates().iterrows()
+    }
+    defense_lookup = {
+        (row["model_name"], row["prompt_id"]): float(row["sanitization_drop"])
+        for _, row in defense_frame.iterrows()
+    }
+    ranked = attacks.copy()
+    ranked["mean_transfer_gain"] = ranked["source_model"].map(transfer_lookup).fillna(0.0)
+    ranked["sanitization_drop"] = ranked.apply(
+        lambda row: defense_lookup.get((row["source_model"], row["prompt_id"]), 0.0), axis=1
+    )
+    ranked["case_score"] = ranked["score_gain"] + (0.4 * ranked["mean_transfer_gain"]) + (0.3 * ranked["sanitization_drop"])
+    return ranked.sort_values("case_score", ascending=False).head(top_k).reset_index(drop=True)
 
 
 def build_attribution_frame(scores: Iterable[PairScore]) -> pd.DataFrame:

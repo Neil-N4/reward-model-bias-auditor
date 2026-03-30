@@ -20,6 +20,7 @@ from reward_model_bias_auditor.attack import search_reward_hack
 from reward_model_bias_auditor.analysis import (
     build_attack_frame,
     build_attribution_frame,
+    build_case_study_frame,
     build_defense_frame,
     build_defense_summary,
     build_model_summary,
@@ -29,6 +30,7 @@ from reward_model_bias_auditor.analysis import (
     scores_to_frame,
 )
 from reward_model_bias_auditor.benchmark import BASE_PROMPTS
+from reward_model_bias_auditor.case_studies import render_case_studies
 from reward_model_bias_auditor.plotting import (
     make_defense_plot,
     make_effect_plot,
@@ -47,6 +49,11 @@ def main() -> None:
     attributions = build_attribution_frame(scores)
     semantic_consistency = build_semantic_consistency_frame(pairs, evaluator=semantic_evaluator)
     model_summary = build_model_summary(summary)
+    model_names = ("rm_small", "rm_instruct", "rm_benchmark_top")
+    auxiliary = {
+        model_name: (lambda task, response, current_model=model_name: score_text_offline(task, response, current_model))
+        for model_name in model_names
+    }
     attack_records = tuple(
         search_reward_hack(
             prompt,
@@ -54,8 +61,9 @@ def main() -> None:
             scorer=lambda task, response, current_model=model_name: score_text_offline(task, response, current_model),
             beam_width=5,
             semantic_evaluator=semantic_evaluator,
+            auxiliary_scorers={name: scorer for name, scorer in auxiliary.items() if name != model_name},
         )
-        for model_name in ("rm_small", "rm_instruct", "rm_benchmark_top")
+        for model_name in model_names
         for prompt in BASE_PROMPTS
     )
     attack_frame = build_attack_frame(attack_records)
@@ -68,6 +76,7 @@ def main() -> None:
         score_text=lambda model_name, task, response: score_text_offline(task, response, model_name),
     )
     defense_summary = build_defense_summary(defense_frame)
+    case_studies = build_case_study_frame(attack_frame, transferability, defense_frame)
 
     outputs = ROOT / "outputs"
     outputs.mkdir(exist_ok=True)
@@ -83,6 +92,7 @@ def main() -> None:
     transferability.to_csv(outputs / "transferability.csv", index=False)
     defense_frame.to_csv(outputs / "defense.csv", index=False)
     defense_summary.to_csv(outputs / "defense_summary.csv", index=False)
+    case_studies.to_csv(outputs / "case_studies.csv", index=False)
     render_markdown_report(
         summary,
         attributions,
@@ -93,6 +103,7 @@ def main() -> None:
         defense_summary,
         outputs / "report.md",
     )
+    render_case_studies(case_studies, outputs / "CASE_STUDIES.md")
     effect_plot = make_effect_plot(summary, docs_images)
     sycophancy_plot = make_sycophancy_plot(summary, docs_images)
     instability_plot = make_instability_plot(model_summary, docs_images)

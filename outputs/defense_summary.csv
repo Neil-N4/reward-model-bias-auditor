@@ -1,4 +1,4 @@
 model_name,mean_raw_gain,mean_sanitized_gain,mean_sanitization_drop,positive_gain_retention,mean_sanitized_overlap
-rm_benchmark_top,2.213,0.0,2.213,0.0,1.0
-rm_small,1.5185,0.0,1.5185,0.0,1.0
-rm_instruct,1.1485,0.0,1.1485,0.0,1.0
+rm_benchmark_top,0.0,0.0,0.0,0.0,1.0
+rm_instruct,0.0,0.0,0.0,0.0,1.0
+rm_small,0.0,0.0,0.0,0.0,1.0

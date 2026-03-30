@@ -9,6 +9,8 @@ from dataclasses import dataclass
 class SemanticCheck:
     lexical_overlap: float
     embedding_similarity: float
+    entailment_score: float
+    contradiction_score: float
     contradiction_flag: bool
     semantic_score: float
     passed: bool
@@ -48,6 +50,8 @@ class SemanticEvaluator:
         self.allow_download = allow_download
         self._embedder = None
         self._embedder_name = "sentence-transformers/all-MiniLM-L6-v2"
+        self._nli_bundle = None
+        self._nli_name = "MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli"
 
     def _load_embedder(self):
         if self._embedder is not None:
@@ -69,6 +73,30 @@ class SemanticEvaluator:
             self._embedder = SentenceTransformer(self._embedder_name)
         return self._embedder
 
+    def _load_nli_bundle(self):
+        if self._nli_bundle is not None:
+            return self._nli_bundle
+        if not self.allow_download:
+            self._nli_bundle = False
+            return self._nli_bundle
+        try:
+            from transformers import AutoModelForSequenceClassification, AutoTokenizer
+        except ImportError:
+            self._nli_bundle = False
+            return self._nli_bundle
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(self._nli_name, local_files_only=True, use_fast=False)
+            model = AutoModelForSequenceClassification.from_pretrained(self._nli_name, local_files_only=True)
+        except Exception:
+            if not self.allow_download:
+                self._nli_bundle = False
+                return self._nli_bundle
+            tokenizer = AutoTokenizer.from_pretrained(self._nli_name, use_fast=False)
+            model = AutoModelForSequenceClassification.from_pretrained(self._nli_name)
+        model.eval()
+        self._nli_bundle = (tokenizer, model)
+        return self._nli_bundle
+
     def _embedding_similarity(self, reference: str, candidate: str) -> float:
         embedder = self._load_embedder()
         if embedder is False:
@@ -78,11 +106,29 @@ class SemanticEvaluator:
         ref_vec, cand_vec = embedder.encode([reference, candidate], normalize_embeddings=True)
         return float(np.dot(ref_vec, cand_vec))
 
+    def _nli_scores(self, reference: str, candidate: str) -> tuple[float, float]:
+        bundle = self._load_nli_bundle()
+        if bundle is False:
+            return (0.0, 0.0)
+        import torch
+
+        tokenizer, model = bundle
+        inputs = tokenizer(reference, candidate, return_tensors="pt", truncation=True, max_length=512)
+        with torch.no_grad():
+            logits = model(**inputs).logits.squeeze()
+            probs = torch.softmax(logits, dim=-1).cpu().tolist()
+        labels = {str(key).lower(): int(value) for key, value in model.config.label2id.items()}
+        entail_idx = labels.get("entailment", labels.get("entails", 2))
+        contra_idx = labels.get("contradiction", labels.get("contradict", 0))
+        return (float(probs[entail_idx]), float(probs[contra_idx]))
+
     def evaluate(self, reference: str, candidate: str) -> SemanticCheck:
         lexical = round(lexical_overlap(reference, candidate), 4)
         contradiction = _negation_contradiction(reference, candidate)
         embedding = 0.0
         backend = "lexical"
+        entailment_score = 0.0
+        contradiction_score = 0.0
         try:
             embedding = round(self._embedding_similarity(reference, candidate), 4)
             if not math.isclose(embedding, 0.0):
@@ -90,16 +136,35 @@ class SemanticEvaluator:
         except Exception:
             embedding = 0.0
             backend = "lexical"
+        try:
+            entailment_score, contradiction_score = self._nli_scores(reference, candidate)
+            entailment_score = round(entailment_score, 4)
+            contradiction_score = round(contradiction_score, 4)
+            if entailment_score > 0 or contradiction_score > 0:
+                backend = "hybrid+nli" if backend == "hybrid" else "nli"
+        except Exception:
+            entailment_score = 0.0
+            contradiction_score = 0.0
         length_ratio = min(len(reference), len(candidate)) / max(1, max(len(reference), len(candidate)))
-        if backend == "hybrid":
+        if "nli" in backend:
+            score = round((0.25 * lexical) + (0.3 * embedding) + (0.3 * entailment_score) + (0.15 * length_ratio), 4)
+        elif backend == "hybrid":
             score = round((0.4 * lexical) + (0.5 * embedding) + (0.1 * length_ratio), 4)
         else:
             score = round((0.8 * lexical) + (0.2 * length_ratio), 4)
-        threshold = self.min_semantic_score if backend == "hybrid" else min(0.45, self.min_semantic_score)
-        passed = lexical >= min(0.22, self.min_lexical_overlap) and score >= threshold and not contradiction
+        threshold = self.min_semantic_score if backend != "lexical" else min(0.45, self.min_semantic_score)
+        contradiction = contradiction or contradiction_score > 0.5
+        passed = (
+            lexical >= min(0.22, self.min_lexical_overlap)
+            and score >= threshold
+            and entailment_score >= (0.45 if "nli" in backend else 0.0)
+            and not contradiction
+        )
         return SemanticCheck(
             lexical_overlap=lexical,
             embedding_similarity=embedding,
+            entailment_score=entailment_score,
+            contradiction_score=contradiction_score,
             contradiction_flag=contradiction,
             semantic_score=score,
             passed=passed,

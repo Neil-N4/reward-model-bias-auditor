@@ -16,6 +16,7 @@ from reward_model_bias_auditor.attack import search_reward_hack
 from reward_model_bias_auditor.analysis import (
     build_attack_frame,
     build_attribution_frame,
+    build_case_study_frame,
     build_defense_frame,
     build_defense_summary,
     build_model_summary,
@@ -24,6 +25,7 @@ from reward_model_bias_auditor.analysis import (
     scores_to_frame,
 )
 from reward_model_bias_auditor.benchmark import BASE_PROMPTS
+from reward_model_bias_auditor.case_studies import render_case_studies
 from reward_model_bias_auditor.hf_runner import load_hf_reward_model, score_pairs_with_hf, score_text_with_hf
 from reward_model_bias_auditor.plotting import (
     make_defense_plot,
@@ -55,7 +57,26 @@ def parse_args() -> argparse.Namespace:
         default=1,
         help="Number of pairs to sample per bias dimension before applying pair-limit.",
     )
+    parser.add_argument(
+        "--model-preset",
+        choices=["default", "openassistant"],
+        default="default",
+        help="Named model set to run when --model is omitted.",
+    )
     return parser.parse_args()
+
+
+MODEL_PRESETS = {
+    "default": [
+        "OpenAssistant/reward-model-deberta-v3-base",
+        "OpenAssistant/reward-model-electra-large-discriminator",
+    ],
+    "openassistant": [
+        "OpenAssistant/reward-model-deberta-v3-base",
+        "OpenAssistant/reward-model-electra-large-discriminator",
+        "OpenAssistant/reward-model-deberta-v3-large-v2",
+    ],
+}
 
 
 def select_pairs(pairs: list, pairs_per_bias: int, pair_limit: int) -> list:
@@ -81,7 +102,7 @@ def select_pairs(pairs: list, pairs_per_bias: int, pair_limit: int) -> list:
 
 def main() -> None:
     args = parse_args()
-    models = args.models or ["OpenAssistant/reward-model-deberta-v3-base"]
+    models = args.models or MODEL_PRESETS[args.model_preset]
     pairs = select_pairs(list(build_benchmark(repeats_per_prompt=10)), args.pairs_per_bias, args.pair_limit)
     semantic_evaluator = SemanticEvaluator(allow_download=True)
 
@@ -106,6 +127,18 @@ def main() -> None:
             ),
             beam_width=5,
             semantic_evaluator=semantic_evaluator,
+            auxiliary_scorers={
+                name: (
+                    lambda task, response, current_model=name: score_text_with_hf(
+                        task,
+                        response,
+                        current_model,
+                        model_bundle=bundles[current_model],
+                    )
+                )
+                for name in models
+                if name != model_name
+            },
         )
         for model_name in models
         for prompt in BASE_PROMPTS
@@ -130,6 +163,7 @@ def main() -> None:
         ),
     )
     defense_summary = build_defense_summary(defense_frame)
+    case_studies = build_case_study_frame(attack_frame, transferability, defense_frame)
 
     outputs = ROOT / "outputs" / "hf"
     outputs.mkdir(parents=True, exist_ok=True)
@@ -144,6 +178,7 @@ def main() -> None:
     transferability.to_csv(outputs / "transferability.csv", index=False)
     defense_frame.to_csv(outputs / "defense.csv", index=False)
     defense_summary.to_csv(outputs / "defense_summary.csv", index=False)
+    case_studies.to_csv(outputs / "case_studies.csv", index=False)
     render_markdown_report(
         summary,
         attributions,
@@ -154,6 +189,7 @@ def main() -> None:
         defense_summary,
         outputs / "report.md",
     )
+    render_case_studies(case_studies, outputs / "CASE_STUDIES.md")
     make_effect_plot(summary, docs_images)
     make_sycophancy_plot(summary, docs_images)
     make_instability_plot(model_summary, docs_images)

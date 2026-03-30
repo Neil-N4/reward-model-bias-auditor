@@ -2,7 +2,7 @@
 
 Reward models can be exploited without changing the underlying answer.
 
-This repository is an evals-style framework for auditing reward-model robustness under **semantic-preserving rewrites**. It starts from a fixed response, applies controlled perturbations, runs a beam-search reward-hacking loop, and measures when reward models change their preferences for the wrong reasons.
+This repository is an evals-style framework for auditing reward-model robustness under **semantic-preserving rewrites**. It starts from a fixed response, applies controlled perturbations, runs a transfer-aware population search over reward-hacking rewrites, and measures when reward models change their preferences for the wrong reasons.
 
 The project is designed around the kinds of failure modes that matter in post-training and preference-model deployment:
 
@@ -16,6 +16,8 @@ The project is designed around the kinds of failure modes that matter in post-tr
 - cross-model exploit transfer
 - preference-signal collapse under input sanitization
 - semantic-guard pass rates under hybrid lexical plus embedding checks
+- entailment-aware semantic filtering
+- case-study export for discovered exploits
 
 ## What This Evaluates
 
@@ -34,7 +36,7 @@ The benchmark currently audits ten perturbation families:
 
 The `exploit_search` family is the most important one: it composes multiple high-reward surface cues into a single semantically preserving rewrite to test whether a model can be systematically “reward hacked.”
 
-On top of that fixed benchmark, the repo now includes a black-box beam-search loop that incrementally applies rewrite operators and keeps only candidates that improve reward score while passing a semantic guard.
+On top of that fixed benchmark, the repo now includes a black-box search loop that optimizes for reward gain, transfer gain, semantic preservation, and edit efficiency while rejecting candidates that fail the semantic guard.
 
 ## Headline Finding
 
@@ -98,6 +100,8 @@ The main outputs are:
 - `mean_sanitization_drop`
 - `hybrid semantic score`
 - `embedding_similarity`
+- `entailment_score`
+- `contradiction_score`
 
 These metrics are meant to answer different questions:
 
@@ -107,6 +111,7 @@ These metrics are meant to answer different questions:
 - Can multiple benign-looking cues be combined into a stronger exploit?
 - Did the rewrites preserve content well enough to make the result meaningful?
 - Do attacks found on one reward model transfer to another?
+- Do those rewrites still entail the original answer?
 - Does normalization remove the inflated preference signal?
 
 ## System Design
@@ -123,12 +128,14 @@ flowchart LR
     F --> H["Model Summary<br/>exploitability ratio + strongest bias"]
     C --> I["Semantic Consistency Gate"]
     D --> I
-    A --> K["Beam-Search Attack Search"]
+    A --> K["Population Search"]
     K --> L["Best Exploit Per Prompt"]
     L --> M["Transferability Matrix"]
     L --> N["Sanitization Defense"]
     A --> O["Hybrid Semantic Guard"]
     O --> K
+    O --> P["NLI Entailment Filter"]
+    P --> K
     G --> J["Markdown Report + Plots"]
     H --> J
     I --> J
@@ -172,12 +179,20 @@ Validated paths:
 - `OpenAssistant/reward-model-deberta-v3-base`
 - `OpenAssistant/reward-model-electra-large-discriminator`
 
+Supported preset:
+
+- `openassistant`
+  - `OpenAssistant/reward-model-deberta-v3-base`
+  - `OpenAssistant/reward-model-electra-large-discriminator`
+  - `OpenAssistant/reward-model-deberta-v3-large-v2`
+
 ## Hybrid Semantic Guard
 
 The semantic filter is stronger than the original lexical-overlap gate. It now combines:
 
 - lexical overlap
 - MiniLM embedding similarity when available
+- MNLI-style entailment scoring when available
 - a contradiction heuristic
 - edit-budget thresholds
 
@@ -204,6 +219,8 @@ This writes:
 - `outputs/transferability.csv`
 - `outputs/defense.csv`
 - `outputs/defense_summary.csv`
+- `outputs/case_studies.csv`
+- `outputs/CASE_STUDIES.md`
 - `outputs/report.md`
 
 ### Real Reward-Model Audit
@@ -224,12 +241,24 @@ This writes real-model outputs under `outputs/hf/`.
 The attack search loop treats the reward model as a black-box objective:
 
 1. start from a canonical answer
-2. apply one rewrite operator at a time
-3. keep the candidate only if reward score improves
+2. expand a population of rewrite candidates
+3. optimize for reward gain, transfer gain, semantic score, and edit efficiency
 4. reject candidates that violate hybrid semantic or edit-budget thresholds
 5. test the discovered exploit against other reward models
 
 This turns the project from a static benchmark into a lightweight reward-hacking discovery engine.
+
+## Case Study Export
+
+Each run can export a dedicated case-study artifact containing:
+
+- base response
+- attacked response
+- canonicalized defense view
+- score gain
+- semantic metrics
+- transfer metrics
+- sanitization drop
 
 ## Paper-Style Docs
 
@@ -265,14 +294,14 @@ Verified locally:
 - offline seeded audit runs end-to-end
 - semantic-consistency outputs are generated
 - bootstrap CI and model summary tables are generated
-- beam-search exploit discovery, transferability, and defense summaries are generated
+- transfer-aware search, entailment-aware filtering, and defense summaries are implemented
 - real HuggingFace scoring works with `OpenAssistant/reward-model-deberta-v3-base`
 - real HuggingFace scoring works with `OpenAssistant/reward-model-electra-large-discriminator`
 - test suite passes in the project venv
 
 ## Semantic-Consistency Gate
 
-This repo includes a hybrid semantic consistency check based on lexical overlap, MiniLM embedding similarity when available, a contradiction heuristic, and an edit-budget constraint in the automated search loop. It is still not a formal entailment proof, but it is materially stronger than lexical overlap alone.
+This repo includes a hybrid semantic consistency check based on lexical overlap, MiniLM embedding similarity, MNLI-style entailment scoring when available, a contradiction heuristic, and an edit-budget constraint in the automated search loop. It is still not a formal proof, but it is materially stronger than lexical overlap alone.
 
 That gate is important because otherwise reward inflation results are too easy to attack: if the rewrite changed the substance, the benchmark has not isolated a reward-model bias.
 
@@ -327,9 +356,3 @@ reward-model-bias-auditor/
 - deployment-ready reward-model certification
 
 This is an evals-grade research artifact, not a finished production safety system.
-
-## Best Resume Framing
-
-If you want the strongest believable framing, it is this:
-
-> Built a controlled evaluation framework for reward-model robustness, discovering semantically preserving rewrites that inflated reward scores through sycophancy, authority, formatting, and composite reward-hacking cues while quantifying ranking instability and exploitability across models.
