@@ -36,20 +36,24 @@ from reward_model_bias_auditor.plotting import (
     make_sycophancy_plot,
     make_transferability_plot,
 )
+from reward_model_bias_auditor.semantic import SemanticEvaluator
 
 
 def main() -> None:
+    semantic_evaluator = SemanticEvaluator(allow_download=True)
     pairs = build_benchmark(repeats_per_prompt=10)
     scores = score_pairs(pairs)
     summary = analyze_scores(scores)
     attributions = build_attribution_frame(scores)
-    semantic_consistency = build_semantic_consistency_frame(pairs)
+    semantic_consistency = build_semantic_consistency_frame(pairs, evaluator=semantic_evaluator)
     model_summary = build_model_summary(summary)
     attack_records = tuple(
         search_reward_hack(
             prompt,
             model_name,
             scorer=lambda task, response, current_model=model_name: score_text_offline(task, response, current_model),
+            beam_width=5,
+            semantic_evaluator=semantic_evaluator,
         )
         for model_name in ("rm_small", "rm_instruct", "rm_benchmark_top")
         for prompt in BASE_PROMPTS

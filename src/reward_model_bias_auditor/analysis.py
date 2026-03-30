@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import math
 import random
-import re
 from collections.abc import Callable, Iterable
 
 import pandas as pd
@@ -10,6 +9,7 @@ import pandas as pd
 from .attack import AttackRecord
 from .defense import sanitize_response
 from .models import PairScore, PerturbationPair
+from .semantic import SemanticEvaluator, lexical_overlap
 
 
 def scores_to_frame(scores: Iterable[PairScore]) -> pd.DataFrame:
@@ -43,33 +43,32 @@ def _bootstrap_mean_ci(series: pd.Series, confidence: float = 0.95, n_boot: int 
     return (samples[max(0, lower_idx)], samples[min(len(samples) - 1, upper_idx)])
 
 
-def _tokenize(text: str) -> set[str]:
-    return {token for token in re.findall(r"[a-z0-9]+", text.lower()) if len(token) > 2}
-
-
-def _semantic_overlap(reference: str, candidate: str) -> float:
-    ref_tokens = _tokenize(reference)
-    cand_tokens = _tokenize(candidate)
-    if not ref_tokens or not cand_tokens:
-        return 0.0
-    intersection = len(ref_tokens & cand_tokens)
-    union = len(ref_tokens | cand_tokens)
-    return intersection / union
-
-
-def build_semantic_consistency_frame(pairs: Iterable[PerturbationPair], threshold: float = 0.38) -> pd.DataFrame:
+def build_semantic_consistency_frame(
+    pairs: Iterable[PerturbationPair],
+    threshold: float = 0.35,
+    evaluator: SemanticEvaluator | None = None,
+) -> pd.DataFrame:
+    evaluator = evaluator or SemanticEvaluator(min_semantic_score=threshold)
     rows = []
     for pair in pairs:
-        score_a = _semantic_overlap(pair.preserved_semantics, pair.response_a)
-        score_b = _semantic_overlap(pair.preserved_semantics, pair.response_b)
+        check_a = evaluator.evaluate(pair.preserved_semantics, pair.response_a)
+        check_b = evaluator.evaluate(pair.preserved_semantics, pair.response_b)
         rows.append(
             {
                 "pair_id": pair.pair_id,
                 "bias_dimension": pair.bias_dimension,
-                "semantic_overlap_a": round(score_a, 4),
-                "semantic_overlap_b": round(score_b, 4),
-                "semantic_overlap_min": round(min(score_a, score_b), 4),
-                "semantic_pass": min(score_a, score_b) >= threshold,
+                "semantic_overlap_a": round(check_a.lexical_overlap, 4),
+                "semantic_overlap_b": round(check_b.lexical_overlap, 4),
+                "embedding_similarity_a": round(check_a.embedding_similarity, 4),
+                "embedding_similarity_b": round(check_b.embedding_similarity, 4),
+                "semantic_score_a": round(check_a.semantic_score, 4),
+                "semantic_score_b": round(check_b.semantic_score, 4),
+                "contradiction_a": check_a.contradiction_flag,
+                "contradiction_b": check_b.contradiction_flag,
+                "semantic_overlap_min": round(min(check_a.lexical_overlap, check_b.lexical_overlap), 4),
+                "semantic_score_min": round(min(check_a.semantic_score, check_b.semantic_score), 4),
+                "semantic_backend": check_a.backend if check_a.backend == check_b.backend else "mixed",
+                "semantic_pass": bool(check_a.passed and check_b.passed),
             }
         )
     return pd.DataFrame(rows)
@@ -142,6 +141,10 @@ def build_attack_frame(records: Iterable[AttackRecord]) -> pd.DataFrame:
                 "task": record.task,
                 "search_steps": record.search_steps,
                 "semantic_score": record.semantic_score,
+                "lexical_overlap": record.lexical_overlap,
+                "embedding_similarity": record.embedding_similarity,
+                "contradiction_flag": record.contradiction_flag,
+                "semantic_backend": record.semantic_backend,
                 "edit_ratio": record.edit_ratio,
                 "base_text": record.base_text,
                 "base_score": record.base_score,
@@ -193,11 +196,13 @@ def build_defense_frame(
             {
                 "model_name": row["source_model"],
                 "prompt_id": row["prompt_id"],
+                "semantic_backend": row["semantic_backend"],
                 "raw_gain": round(raw_gain, 6),
                 "sanitized_score": round(float(sanitized_score), 6),
                 "sanitized_gain": round(sanitized_gain, 6),
                 "sanitization_drop": round(float(row["best_score"] - sanitized_score), 6),
                 "sanitization_preserved_positive": sanitized_gain > 0,
+                "sanitized_overlap": round(lexical_overlap(row["base_text"], sanitized), 4),
             }
         )
     return pd.DataFrame(rows)
@@ -221,6 +226,7 @@ def build_defense_summary(defense_frame: pd.DataFrame) -> pd.DataFrame:
             mean_sanitized_gain=("sanitized_gain", "mean"),
             mean_sanitization_drop=("sanitization_drop", "mean"),
             positive_gain_retention=("sanitization_preserved_positive", "mean"),
+            mean_sanitized_overlap=("sanitized_overlap", "mean"),
         )
         .reset_index()
     )

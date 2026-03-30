@@ -32,6 +32,7 @@ from reward_model_bias_auditor.plotting import (
     make_sycophancy_plot,
     make_transferability_plot,
 )
+from reward_model_bias_auditor.semantic import SemanticEvaluator
 
 
 def parse_args() -> argparse.Namespace:
@@ -82,6 +83,7 @@ def main() -> None:
     args = parse_args()
     models = args.models or ["OpenAssistant/reward-model-deberta-v3-base"]
     pairs = select_pairs(list(build_benchmark(repeats_per_prompt=10)), args.pairs_per_bias, args.pair_limit)
+    semantic_evaluator = SemanticEvaluator(allow_download=True)
 
     all_scores = []
     bundles = {model_name: load_hf_reward_model(model_name) for model_name in models}
@@ -90,7 +92,7 @@ def main() -> None:
     scores = tuple(all_scores)
     summary = analyze_scores(scores)
     attributions = build_attribution_frame(scores)
-    semantic_consistency = build_semantic_consistency_frame(pairs)
+    semantic_consistency = build_semantic_consistency_frame(pairs, evaluator=semantic_evaluator)
     model_summary = build_model_summary(summary)
     attack_records = tuple(
         search_reward_hack(
@@ -102,6 +104,8 @@ def main() -> None:
                 current_model,
                 model_bundle=bundles[current_model],
             ),
+            beam_width=5,
+            semantic_evaluator=semantic_evaluator,
         )
         for model_name in models
         for prompt in BASE_PROMPTS
