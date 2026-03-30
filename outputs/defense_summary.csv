@@ -1,4 +1,4 @@
-model_name,mean_raw_gain,mean_sanitized_gain,mean_sanitization_drop,positive_gain_retention,mean_sanitized_overlap
-rm_benchmark_top,0.0,0.0,0.0,0.0,1.0
-rm_instruct,0.0,0.0,0.0,0.0,1.0
-rm_small,0.0,0.0,0.0,0.0,1.0
+model_name,mean_raw_gain,mean_sanitized_gain,mean_sanitization_drop,positive_gain_retention,mean_sanitized_overlap,mean_entailment_score
+rm_benchmark_top,1.7224,0.0,1.7224,0.0,1.0,0.76278
+rm_small,1.1519,0.0,1.1519,0.0,1.0,0.7047
+rm_instruct,0.8728,0.0,0.8728,0.0,1.0,0.72716
