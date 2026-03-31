@@ -31,6 +31,8 @@ from reward_model_bias_auditor.analysis import (
 )
 from reward_model_bias_auditor.benchmark import BASE_PROMPTS
 from reward_model_bias_auditor.case_studies import render_case_studies
+from reward_model_bias_auditor.defense import rerank_preferences, summarize_reranker
+from reward_model_bias_auditor.generator import ParaphraseGenerator
 from reward_model_bias_auditor.plotting import (
     make_defense_plot,
     make_effect_plot,
@@ -43,6 +45,7 @@ from reward_model_bias_auditor.semantic import SemanticEvaluator
 
 def main() -> None:
     semantic_evaluator = SemanticEvaluator(allow_download=True)
+    paraphrase_generator = ParaphraseGenerator(allow_download=True)
     pairs = build_benchmark(repeats_per_prompt=10)
     scores = score_pairs(pairs)
     summary = analyze_scores(scores)
@@ -62,6 +65,7 @@ def main() -> None:
             beam_width=5,
             semantic_evaluator=semantic_evaluator,
             auxiliary_scorers={name: scorer for name, scorer in auxiliary.items() if name != model_name},
+            paraphrase_generator=paraphrase_generator,
         )
         for model_name in model_names
         for prompt in BASE_PROMPTS
@@ -77,6 +81,13 @@ def main() -> None:
     )
     defense_summary = build_defense_summary(defense_frame)
     case_studies = build_case_study_frame(attack_frame, transferability, defense_frame)
+    pairs_frame = pairs_to_frame(pairs)
+    reranker = rerank_preferences(
+        pairs_frame,
+        score_text=lambda model_name, task, response: score_text_offline(task, response, model_name),
+        model_names=list(model_names),
+    )
+    reranker_summary = summarize_reranker(reranker)
 
     outputs = ROOT / "outputs"
     outputs.mkdir(exist_ok=True)
@@ -93,6 +104,8 @@ def main() -> None:
     defense_frame.to_csv(outputs / "defense.csv", index=False)
     defense_summary.to_csv(outputs / "defense_summary.csv", index=False)
     case_studies.to_csv(outputs / "case_studies.csv", index=False)
+    reranker.to_csv(outputs / "reranker.csv", index=False)
+    reranker_summary.to_csv(outputs / "reranker_summary.csv", index=False)
     render_markdown_report(
         summary,
         attributions,

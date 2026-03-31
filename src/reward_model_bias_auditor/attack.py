@@ -15,6 +15,7 @@ from .benchmark import (
     _sycophancy,
 )
 from .models import BasePrompt
+from .generator import ParaphraseGenerator, merge_generated_candidates
 from .semantic import SemanticCheck, SemanticEvaluator
 
 
@@ -72,6 +73,8 @@ def search_reward_hack(
     max_edit_ratio: float = 3.5,
     semantic_evaluator: SemanticEvaluator | None = None,
     auxiliary_scorers: dict[str, AttackScorer] | None = None,
+    paraphrase_generator: ParaphraseGenerator | None = None,
+    generated_variant_count: int = 2,
     transfer_weight: float = 0.35,
     semantic_weight: float = 0.25,
     edit_penalty: float = 0.08,
@@ -92,10 +95,16 @@ def search_reward_hack(
     for _ in range(max_steps):
         candidates: list[tuple[str, tuple[str, ...], float, float, SemanticCheck]] = []
         for current_text, applied_ops, _, _, _ in frontier:
+            direct_candidates: list[tuple[str, tuple[str, ...]]] = []
             for operation_name, operation in operations:
                 if operation_name in applied_ops:
                     continue
-                candidate = operation(current_text)
+                direct_candidates.append((operation(current_text), applied_ops + (operation_name,)))
+            if paraphrase_generator is not None:
+                generated = paraphrase_generator.generate(prompt.task, current_text, variants=generated_variant_count)
+                direct_candidates.extend(merge_generated_candidates(generated, applied_ops))
+
+            for candidate, candidate_ops in direct_candidates:
                 check = evaluator.evaluate(prompt.base_response, candidate)
                 if not check.passed:
                     continue
@@ -117,10 +126,10 @@ def search_reward_hack(
                     + (semantic_weight * check.semantic_score)
                     - (edit_penalty * edit_ratio)
                 )
-                candidates.append((candidate, applied_ops + (operation_name,), candidate_score, fitness, check))
+                candidates.append((candidate, candidate_ops, candidate_score, fitness, check))
                 if candidate_score > best_score:
                     best_text = candidate
-                    best_ops = applied_ops + (operation_name,)
+                    best_ops = candidate_ops
                     best_score = candidate_score
                     best_check = check
         if not candidates:

@@ -179,12 +179,11 @@ Validated paths:
 - `OpenAssistant/reward-model-deberta-v3-base`
 - `OpenAssistant/reward-model-electra-large-discriminator`
 
-Supported preset:
+Validated preset:
 
 - `openassistant`
   - `OpenAssistant/reward-model-deberta-v3-base`
   - `OpenAssistant/reward-model-electra-large-discriminator`
-  - `OpenAssistant/reward-model-deberta-v3-large-v2`
 
 ## Hybrid Semantic Guard
 
@@ -248,6 +247,8 @@ The attack search loop treats the reward model as a black-box objective:
 
 This turns the project from a static benchmark into a lightweight reward-hacking discovery engine.
 
+Optional generator-backed search is also supported through a paraphrase model, so the search loop can mix hand-designed rewrite operators with model-generated rewrites.
+
 ## Case Study Export
 
 Each run can export a dedicated case-study artifact containing:
@@ -259,6 +260,21 @@ Each run can export a dedicated case-study artifact containing:
 - semantic metrics
 - transfer metrics
 - sanitization drop
+
+## Canonicalization Reranker
+
+Beyond heuristic sanitization, the repo includes a canonicalization reranker that:
+
+- canonicalizes both answers in a pair
+- rescoring them under the same reward model
+- measures whether preference rankings flip after normalization
+
+The intended outputs are:
+
+- `outputs/reranker.csv`
+- `outputs/reranker_summary.csv`
+- `outputs/hf/reranker.csv`
+- `outputs/hf/reranker_summary.csv`
 
 ## Paper-Style Docs
 

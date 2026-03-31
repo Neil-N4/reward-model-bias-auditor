@@ -22,10 +22,13 @@ from reward_model_bias_auditor.analysis import (
     build_model_summary,
     build_semantic_consistency_frame,
     build_transferability_frame,
+    pairs_to_frame,
     scores_to_frame,
 )
 from reward_model_bias_auditor.benchmark import BASE_PROMPTS
 from reward_model_bias_auditor.case_studies import render_case_studies
+from reward_model_bias_auditor.defense import rerank_preferences, summarize_reranker
+from reward_model_bias_auditor.generator import ParaphraseGenerator
 from reward_model_bias_auditor.hf_runner import load_hf_reward_model, score_pairs_with_hf, score_text_with_hf
 from reward_model_bias_auditor.plotting import (
     make_defense_plot,
@@ -63,6 +66,11 @@ def parse_args() -> argparse.Namespace:
         default="default",
         help="Named model set to run when --model is omitted.",
     )
+    parser.add_argument(
+        "--use-generator-search",
+        action="store_true",
+        help="Enable paraphrase-model candidate generation during attack search.",
+    )
     return parser.parse_args()
 
 
@@ -74,7 +82,6 @@ MODEL_PRESETS = {
     "openassistant": [
         "OpenAssistant/reward-model-deberta-v3-base",
         "OpenAssistant/reward-model-electra-large-discriminator",
-        "OpenAssistant/reward-model-deberta-v3-large-v2",
     ],
 }
 
@@ -105,6 +112,7 @@ def main() -> None:
     models = args.models or MODEL_PRESETS[args.model_preset]
     pairs = select_pairs(list(build_benchmark(repeats_per_prompt=10)), args.pairs_per_bias, args.pair_limit)
     semantic_evaluator = SemanticEvaluator(allow_download=True)
+    paraphrase_generator = ParaphraseGenerator(allow_download=True) if args.use_generator_search else None
 
     all_scores = []
     bundles = {model_name: load_hf_reward_model(model_name) for model_name in models}
@@ -139,6 +147,7 @@ def main() -> None:
                 for name in models
                 if name != model_name
             },
+            paraphrase_generator=paraphrase_generator,
         )
         for model_name in models
         for prompt in BASE_PROMPTS
@@ -164,6 +173,17 @@ def main() -> None:
     )
     defense_summary = build_defense_summary(defense_frame)
     case_studies = build_case_study_frame(attack_frame, transferability, defense_frame)
+    reranker = rerank_preferences(
+        pairs_to_frame(pairs),
+        score_text=lambda model_name, task, response: score_text_with_hf(
+            task,
+            response,
+            model_name,
+            model_bundle=bundles[model_name],
+        ),
+        model_names=models,
+    )
+    reranker_summary = summarize_reranker(reranker)
 
     outputs = ROOT / "outputs" / "hf"
     outputs.mkdir(parents=True, exist_ok=True)
@@ -179,6 +199,8 @@ def main() -> None:
     defense_frame.to_csv(outputs / "defense.csv", index=False)
     defense_summary.to_csv(outputs / "defense_summary.csv", index=False)
     case_studies.to_csv(outputs / "case_studies.csv", index=False)
+    reranker.to_csv(outputs / "reranker.csv", index=False)
+    reranker_summary.to_csv(outputs / "reranker_summary.csv", index=False)
     render_markdown_report(
         summary,
         attributions,

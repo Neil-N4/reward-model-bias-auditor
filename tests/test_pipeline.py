@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 
+import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -20,6 +21,7 @@ from reward_model_bias_auditor.analysis import (
 )
 from reward_model_bias_auditor.attack import search_reward_hack
 from reward_model_bias_auditor.benchmark import BASE_PROMPTS
+from reward_model_bias_auditor.defense import rerank_preferences, summarize_reranker
 
 
 def test_benchmark_size_matches_expected_pair_count() -> None:
@@ -73,3 +75,18 @@ def test_attack_search_transferability_and_defense_frames_are_generated() -> Non
     assert "mean_transfer_gain" in transferability.columns
     assert not defense_summary.empty
     assert defense_summary["mean_sanitization_drop"].max() >= 0
+
+
+def test_reranker_outputs_are_generated() -> None:
+    pairs = build_benchmark(repeats_per_prompt=1)
+    pair_frame = pd.DataFrame([pair.__dict__ for pair in pairs])
+    reranker = rerank_preferences(
+        pair_frame,
+        score_text=lambda model_name, task, response: score_text_offline(task, response, model_name),
+        model_names=["rm_small", "rm_instruct"],
+    )
+    summary = summarize_reranker(reranker)
+    assert not reranker.empty
+    assert "rank_flip" in reranker.columns
+    assert not summary.empty
+    assert "rank_flip_rate" in summary.columns

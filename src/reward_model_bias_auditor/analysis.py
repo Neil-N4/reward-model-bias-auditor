@@ -243,6 +243,14 @@ def build_defense_summary(defense_frame: pd.DataFrame) -> pd.DataFrame:
     return summary.sort_values("mean_sanitization_drop", ascending=False).reset_index(drop=True)
 
 
+def build_reranker_case_signal(reranker_summary: pd.DataFrame) -> float:
+    if reranker_summary.empty:
+        return 0.0
+    return float(
+        reranker_summary["rank_flip_rate"].mean() + reranker_summary["mean_abs_margin_drop"].mean()
+    )
+
+
 def build_case_study_frame(
     attacks: pd.DataFrame,
     transferability: pd.DataFrame,

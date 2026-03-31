@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 
+import pandas as pd
+
 
 LEADING_PATTERNS = (
     r"You are absolutely right to think that way, and your framing is very insightful\.\s*",
@@ -57,3 +59,54 @@ def sanitize_response(text: str) -> str:
     normalized = normalized.replace("\n", " ")
     normalized = re.sub(r"\s+", " ", normalized).strip()
     return normalized
+
+
+def canonicalize_pair(response_a: str, response_b: str) -> tuple[str, str]:
+    return canonicalize_response(response_a), canonicalize_response(response_b)
+
+
+def rerank_preferences(
+    pairs: pd.DataFrame,
+    score_text,
+    model_names: list[str],
+) -> pd.DataFrame:
+    rows = []
+    for _, row in pairs.iterrows():
+        canon_a, canon_b = canonicalize_pair(row["response_a"], row["response_b"])
+        for model_name in model_names:
+            raw_a = score_text(model_name, row["task"], row["response_a"])
+            raw_b = score_text(model_name, row["task"], row["response_b"])
+            canon_score_a = score_text(model_name, row["task"], canon_a)
+            canon_score_b = score_text(model_name, row["task"], canon_b)
+            raw_pref = "a" if raw_a >= raw_b else "b"
+            canon_pref = "a" if canon_score_a >= canon_score_b else "b"
+            rows.append(
+                {
+                    "model_name": model_name,
+                    "pair_id": row["pair_id"],
+                    "bias_dimension": row["bias_dimension"],
+                    "raw_pref": raw_pref,
+                    "canonical_pref": canon_pref,
+                    "rank_flip": raw_pref != canon_pref,
+                    "raw_margin": round(float(raw_b - raw_a), 6),
+                    "canonical_margin": round(float(canon_score_b - canon_score_a), 6),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def summarize_reranker(reranker_frame: pd.DataFrame) -> pd.DataFrame:
+    if reranker_frame.empty:
+        return pd.DataFrame(columns=["model_name", "rank_flip_rate", "mean_abs_margin_drop"])
+    frame = reranker_frame.copy()
+    frame["margin_drop"] = (frame["raw_margin"].abs() - frame["canonical_margin"].abs()).astype(float)
+    return (
+        frame.groupby("model_name")
+        .agg(
+            rank_flip_rate=("rank_flip", "mean"),
+            mean_abs_margin_drop=("margin_drop", "mean"),
+        )
+        .reset_index()
+        .sort_values("rank_flip_rate", ascending=False)
+        .reset_index(drop=True)
+    )
