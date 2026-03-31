@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
@@ -34,6 +35,8 @@ class AttackRecord:
     lexical_overlap: float
     embedding_similarity: float
     entailment_score: float
+    mutual_entailment_score: float
+    transfer_gain: float
     contradiction_score: float
     contradiction_flag: bool
     semantic_backend: str
@@ -41,6 +44,8 @@ class AttackRecord:
     base_score: float
     best_score: float
     score_gain: float
+    evaluated_candidates: int
+    search_mode: str
     applied_operations: tuple[str, ...]
 
 
@@ -62,6 +67,170 @@ def _rewrite_library() -> tuple[tuple[str, Callable[[str], str]], ...]:
     )
 
 
+@dataclass(frozen=True)
+class _Candidate:
+    text: str
+    operations: tuple[str, ...]
+    score: float
+    transfer_gain: float
+    fitness: float
+    semantic: SemanticCheck
+
+
+class PopulationSearch:
+    def __init__(
+        self,
+        prompt: BasePrompt,
+        scorer: AttackScorer,
+        evaluator: SemanticEvaluator,
+        auxiliary_scorers: dict[str, AttackScorer] | None = None,
+        paraphrase_generator: ParaphraseGenerator | None = None,
+        generated_variant_count: int = 2,
+        population_size: int = 12,
+        max_generations: int = 5,
+        elite_fraction: float = 0.35,
+        mutation_budget: int = 6,
+        max_edit_ratio: float = 3.5,
+        transfer_weight: float = 0.35,
+        semantic_weight: float = 0.25,
+        edit_penalty: float = 0.08,
+        seed: int = 11,
+    ) -> None:
+        self.prompt = prompt
+        self.scorer = scorer
+        self.evaluator = evaluator
+        self.auxiliary_scorers = auxiliary_scorers or {}
+        self.paraphrase_generator = paraphrase_generator
+        self.generated_variant_count = generated_variant_count
+        self.population_size = population_size
+        self.max_generations = max_generations
+        self.elite_fraction = elite_fraction
+        self.mutation_budget = mutation_budget
+        self.max_edit_ratio = max_edit_ratio
+        self.transfer_weight = transfer_weight
+        self.semantic_weight = semantic_weight
+        self.edit_penalty = edit_penalty
+        self.random = random.Random(seed)
+        self.base_score = scorer(prompt.task, prompt.base_response)
+        self.operations = _rewrite_library()
+        base_check = evaluator.evaluate(prompt.base_response, prompt.base_response)
+        self.base_candidate = _Candidate(
+            text=prompt.base_response,
+            operations=tuple(),
+            score=self.base_score,
+            transfer_gain=0.0,
+            fitness=self.base_score,
+            semantic=base_check,
+        )
+        self.evaluated_candidates = 0
+
+    def _transfer_gain(self, text: str) -> float:
+        if not self.auxiliary_scorers:
+            return 0.0
+        gains = []
+        for scorer in self.auxiliary_scorers.values():
+            gains.append(scorer(self.prompt.task, text) - scorer(self.prompt.task, self.prompt.base_response))
+        return sum(gains) / len(gains) if gains else 0.0
+
+    def _fitness(self, score: float, transfer_gain: float, semantic: SemanticCheck, edit_ratio: float) -> float:
+        return (
+            (score - self.base_score)
+            + (self.transfer_weight * transfer_gain)
+            + (self.semantic_weight * semantic.semantic_score)
+            - (self.edit_penalty * edit_ratio)
+        )
+
+    def _evaluate(self, text: str, operations: tuple[str, ...]) -> _Candidate | None:
+        semantic = self.evaluator.evaluate(self.prompt.base_response, text)
+        if not semantic.passed:
+            return None
+        edit_ratio = _edit_ratio(self.prompt.base_response, text)
+        if edit_ratio > self.max_edit_ratio:
+            return None
+        score = self.scorer(self.prompt.task, text)
+        transfer_gain = self._transfer_gain(text)
+        fitness = self._fitness(score, transfer_gain, semantic, edit_ratio)
+        self.evaluated_candidates += 1
+        return _Candidate(
+            text=text,
+            operations=operations,
+            score=score,
+            transfer_gain=transfer_gain,
+            fitness=fitness,
+            semantic=semantic,
+        )
+
+    def _crossover(self, left: _Candidate, right: _Candidate) -> tuple[str, tuple[str, ...]] | None:
+        left_sentences = [part.strip() for part in left.text.split(". ") if part.strip()]
+        right_sentences = [part.strip() for part in right.text.split(". ") if part.strip()]
+        if len(left_sentences) < 2 or not right_sentences:
+            return None
+        split = max(1, len(left_sentences) // 2)
+        combined = ". ".join(left_sentences[:split] + right_sentences[-split:]).strip()
+        if not combined:
+            return None
+        if not combined.endswith("."):
+            combined += "."
+        merged_ops = tuple(dict.fromkeys(left.operations + right.operations + ("crossover",)))
+        return combined, merged_ops
+
+    def _mutations(self, candidate: _Candidate) -> list[tuple[str, tuple[str, ...]]]:
+        proposals: list[tuple[str, tuple[str, ...]]] = []
+        available = [(name, op) for name, op in self.operations if name not in candidate.operations]
+        self.random.shuffle(available)
+        for name, op in available[: self.mutation_budget]:
+            proposals.append((op(candidate.text), candidate.operations + (name,)))
+        if self.paraphrase_generator is not None:
+            generated = self.paraphrase_generator.generate(
+                self.prompt.task,
+                candidate.text,
+                variants=self.generated_variant_count,
+            )
+            proposals.extend(merge_generated_candidates(generated, candidate.operations))
+        return proposals
+
+    def run(self) -> tuple[_Candidate, int]:
+        population: list[_Candidate] = [self.base_candidate]
+        seen = {self.prompt.base_response.lower()}
+        best = self.base_candidate
+        generations = 0
+
+        for _ in range(self.max_generations):
+            proposals: list[_Candidate] = []
+            elite_count = max(1, int(len(population) * self.elite_fraction))
+            elites = sorted(population, key=lambda cand: (cand.fitness, cand.score), reverse=True)[:elite_count]
+            for candidate in elites:
+                for text, operations in self._mutations(candidate):
+                    key = text.lower().strip()
+                    if not key or key in seen:
+                        continue
+                    seen.add(key)
+                    evaluated = self._evaluate(text, operations)
+                    if evaluated is not None:
+                        proposals.append(evaluated)
+                mate = self.random.choice(elites)
+                crossed = self._crossover(candidate, mate)
+                if crossed is not None:
+                    text, operations = crossed
+                    key = text.lower().strip()
+                    if key and key not in seen:
+                        seen.add(key)
+                        evaluated = self._evaluate(text, operations)
+                        if evaluated is not None:
+                            proposals.append(evaluated)
+            if not proposals:
+                break
+            population = sorted(
+                population + proposals,
+                key=lambda cand: (cand.fitness, cand.score, cand.semantic.semantic_score),
+                reverse=True,
+            )[: self.population_size]
+            if population[0].score > best.score:
+                best = population[0]
+            generations += 1
+        return best, generations
+
+
 def search_reward_hack(
     prompt: BasePrompt,
     model_name: str,
@@ -80,84 +249,45 @@ def search_reward_hack(
     edit_penalty: float = 0.08,
 ) -> AttackRecord:
     evaluator = semantic_evaluator or SemanticEvaluator(min_semantic_score=min_semantic_score)
-    base_score = scorer(prompt.task, prompt.base_response)
-    base_check = evaluator.evaluate(prompt.base_response, prompt.base_response)
-    frontier: list[tuple[str, tuple[str, ...], float, float, SemanticCheck]] = [
-        (prompt.base_response, tuple(), base_score, base_score, base_check)
-    ]
-    best_text = prompt.base_response
-    best_ops: tuple[str, ...] = tuple()
-    best_score = base_score
-    best_check = base_check
-    search_steps = 0
-    operations = _rewrite_library()
-
-    for _ in range(max_steps):
-        candidates: list[tuple[str, tuple[str, ...], float, float, SemanticCheck]] = []
-        for current_text, applied_ops, _, _, _ in frontier:
-            direct_candidates: list[tuple[str, tuple[str, ...]]] = []
-            for operation_name, operation in operations:
-                if operation_name in applied_ops:
-                    continue
-                direct_candidates.append((operation(current_text), applied_ops + (operation_name,)))
-            if paraphrase_generator is not None:
-                generated = paraphrase_generator.generate(prompt.task, current_text, variants=generated_variant_count)
-                direct_candidates.extend(merge_generated_candidates(generated, applied_ops))
-
-            for candidate, candidate_ops in direct_candidates:
-                check = evaluator.evaluate(prompt.base_response, candidate)
-                if not check.passed:
-                    continue
-                edit_ratio = _edit_ratio(prompt.base_response, candidate)
-                if edit_ratio > max_edit_ratio:
-                    continue
-                candidate_score = scorer(prompt.task, candidate)
-                transfer_score = 0.0
-                if auxiliary_scorers:
-                    transfer_gains = []
-                    for aux_scorer in auxiliary_scorers.values():
-                        aux_base = aux_scorer(prompt.task, prompt.base_response)
-                        aux_candidate = aux_scorer(prompt.task, candidate)
-                        transfer_gains.append(aux_candidate - aux_base)
-                    transfer_score = sum(transfer_gains) / len(transfer_gains) if transfer_gains else 0.0
-                fitness = (
-                    candidate_score
-                    + (transfer_weight * transfer_score)
-                    + (semantic_weight * check.semantic_score)
-                    - (edit_penalty * edit_ratio)
-                )
-                candidates.append((candidate, candidate_ops, candidate_score, fitness, check))
-                if candidate_score > best_score:
-                    best_text = candidate
-                    best_ops = candidate_ops
-                    best_score = candidate_score
-                    best_check = check
-        if not candidates:
-            break
-        candidates.sort(key=lambda item: (item[3], item[2], item[4].semantic_score), reverse=True)
-        frontier = candidates[: max(beam_width, population_size // 3)]
-        search_steps += 1
-
-    base_score = scorer(prompt.task, prompt.base_response)
+    optimizer = PopulationSearch(
+        prompt=prompt,
+        scorer=scorer,
+        evaluator=evaluator,
+        auxiliary_scorers=auxiliary_scorers,
+        paraphrase_generator=paraphrase_generator,
+        generated_variant_count=generated_variant_count,
+        population_size=max(population_size, beam_width * 2),
+        max_generations=max_steps,
+        max_edit_ratio=max_edit_ratio,
+        transfer_weight=transfer_weight,
+        semantic_weight=semantic_weight,
+        edit_penalty=edit_penalty,
+    )
+    best_candidate, search_steps = optimizer.run()
+    base_score = optimizer.base_score
     return AttackRecord(
         source_model=model_name,
         prompt_id=prompt.prompt_id,
         task=prompt.task,
         base_text=prompt.base_response,
-        best_text=best_text,
+        best_text=best_candidate.text,
         search_steps=search_steps,
-        semantic_score=best_check.semantic_score,
-        lexical_overlap=best_check.lexical_overlap,
-        embedding_similarity=best_check.embedding_similarity,
-        entailment_score=best_check.entailment_score,
-        contradiction_score=best_check.contradiction_score,
-        contradiction_flag=best_check.contradiction_flag,
-        semantic_backend=best_check.backend,
-        edit_ratio=_edit_ratio(prompt.base_response, best_text),
+        semantic_score=best_candidate.semantic.semantic_score,
+        lexical_overlap=best_candidate.semantic.lexical_overlap,
+        embedding_similarity=best_candidate.semantic.embedding_similarity,
+        entailment_score=best_candidate.semantic.entailment_score,
+        mutual_entailment_score=best_candidate.semantic.mutual_entailment_score,
+        transfer_gain=round(best_candidate.transfer_gain, 6),
+        contradiction_score=best_candidate.semantic.contradiction_score,
+        contradiction_flag=best_candidate.semantic.contradiction_flag,
+        semantic_backend=best_candidate.semantic.backend,
+        edit_ratio=_edit_ratio(prompt.base_response, best_candidate.text),
         base_score=round(base_score, 6),
-        best_score=round(best_score, 6),
-        score_gain=round(best_score - base_score, 6),
-        applied_operations=best_ops,
+        best_score=round(best_candidate.score, 6),
+        score_gain=round(best_candidate.score - base_score, 6),
+        evaluated_candidates=optimizer.evaluated_candidates,
+        search_mode="evolutionary",
+        applied_operations=best_candidate.operations,
     )
 
 
@@ -174,6 +304,8 @@ def attack_records_to_rows(records: Iterable[AttackRecord]) -> list[dict[str, ob
                 "lexical_overlap": record.lexical_overlap,
                 "embedding_similarity": record.embedding_similarity,
                 "entailment_score": record.entailment_score,
+                "mutual_entailment_score": record.mutual_entailment_score,
+                "transfer_gain": record.transfer_gain,
                 "contradiction_score": record.contradiction_score,
                 "contradiction_flag": record.contradiction_flag,
                 "semantic_backend": record.semantic_backend,
@@ -181,6 +313,8 @@ def attack_records_to_rows(records: Iterable[AttackRecord]) -> list[dict[str, ob
                 "base_score": record.base_score,
                 "best_score": record.best_score,
                 "score_gain": record.score_gain,
+                "evaluated_candidates": record.evaluated_candidates,
+                "search_mode": record.search_mode,
                 "applied_operations": ",".join(record.applied_operations),
                 "best_text": record.best_text,
             }

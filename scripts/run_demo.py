@@ -33,7 +33,12 @@ from reward_model_bias_auditor.analysis import (
 )
 from reward_model_bias_auditor.benchmark import BASE_PROMPTS
 from reward_model_bias_auditor.case_studies import render_case_studies
-from reward_model_bias_auditor.defense import rerank_preferences, summarize_reranker
+from reward_model_bias_auditor.defense import (
+    build_mitigation_frame,
+    rerank_preferences,
+    summarize_mitigation,
+    summarize_reranker,
+)
 from reward_model_bias_auditor.generator import ParaphraseGenerator
 from reward_model_bias_auditor.plotting import (
     make_defense_plot,
@@ -94,6 +99,11 @@ def main() -> None:
         score_text=lambda model_name, task, response: score_text_offline(task, response, model_name),
     )
     defense_summary = build_defense_summary(defense_frame)
+    mitigation_frame = build_mitigation_frame(
+        attack_frame,
+        score_text=lambda model_name, task, response: score_text_offline(task, response, model_name),
+    )
+    mitigation_summary = summarize_mitigation(mitigation_frame)
     case_studies = build_case_study_frame(attack_frame, transferability, defense_frame)
     pairs_frame = pairs_to_frame(pairs)
     universal_cues = build_universal_cue_frame(attack_frame, transferability)
@@ -118,6 +128,8 @@ def main() -> None:
     transferability.to_csv(outputs / "transferability.csv", index=False)
     defense_frame.to_csv(outputs / "defense.csv", index=False)
     defense_summary.to_csv(outputs / "defense_summary.csv", index=False)
+    mitigation_frame.to_csv(outputs / "mitigation.csv", index=False)
+    mitigation_summary.to_csv(outputs / "mitigation_summary.csv", index=False)
     case_studies.to_csv(outputs / "case_studies.csv", index=False)
     universal_cues.to_csv(outputs / "universal_cues.csv", index=False)
     reranker.to_csv(outputs / "reranker.csv", index=False)
@@ -130,6 +142,7 @@ def main() -> None:
         attack_frame,
         transferability,
         defense_summary,
+        mitigation_summary,
         reranker_summary,
         universal_cues,
         outputs / "report.md",

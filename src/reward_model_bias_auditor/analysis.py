@@ -153,6 +153,8 @@ def build_attack_frame(records: Iterable[AttackRecord]) -> pd.DataFrame:
                 "lexical_overlap": record.lexical_overlap,
                 "embedding_similarity": record.embedding_similarity,
                 "entailment_score": record.entailment_score,
+                "mutual_entailment_score": record.mutual_entailment_score,
+                "transfer_gain": record.transfer_gain,
                 "contradiction_score": record.contradiction_score,
                 "contradiction_flag": record.contradiction_flag,
                 "semantic_backend": record.semantic_backend,
@@ -161,6 +163,8 @@ def build_attack_frame(records: Iterable[AttackRecord]) -> pd.DataFrame:
                 "base_score": record.base_score,
                 "best_score": record.best_score,
                 "score_gain": record.score_gain,
+                "evaluated_candidates": record.evaluated_candidates,
+                "search_mode": record.search_mode,
                 "applied_operations": ",".join(record.applied_operations),
                 "best_text": record.best_text,
             }

@@ -13,6 +13,7 @@ def render_markdown_report(
     attacks: pd.DataFrame | None,
     transferability: pd.DataFrame | None,
     defense_summary: pd.DataFrame | None,
+    mitigation_summary: pd.DataFrame | None,
     reranker_summary: pd.DataFrame | None,
     universal_cues: pd.DataFrame | None,
     output_path: Path,
@@ -38,6 +39,8 @@ def render_markdown_report(
     attack_gain = 0.0 if attacks is None or attacks.empty else float(attacks["score_gain"].mean())
     transfer_gain = 0.0 if transferability is None or transferability.empty else float(transferability["mean_transfer_gain"].mean())
     defense_drop = 0.0 if defense_summary is None or defense_summary.empty else float(defense_summary["mean_sanitization_drop"].mean())
+    mitigation_drop = 0.0 if mitigation_summary is None or mitigation_summary.empty else float(mitigation_summary["mean_inflation_reduction"].mean())
+    mitigation_instability = 0.0 if mitigation_summary is None or mitigation_summary.empty else float(mitigation_summary["instability_reduction"].mean())
     rerank_flip = 0.0 if reranker_summary is None or reranker_summary.empty else float(reranker_summary["rank_flip_rate"].mean())
     margin_drop = 0.0 if reranker_summary is None or reranker_summary.empty else float(reranker_summary["mean_abs_margin_drop"].mean())
 
@@ -64,6 +67,7 @@ def render_markdown_report(
         f"- Automated exploit search increased scores by an average of `{attack_gain:.3f}` while keeping semantic-consistency constraints active.",
         f"- Cross-model transfer produced mean attack gain `{transfer_gain:.3f}`, showing whether hacks stay local or generalize.",
         f"- Sanitization dropped exploit scores by `{defense_drop:.3f}` on average, which turns the repo into an audit-plus-defense workflow.",
+        f"- The mitigation filter reduced adversarial reward inflation by `{mitigation_drop:.3f}` on average and lowered attack success by `{mitigation_instability:.2%}`.",
         f"- Canonicalization reranking flipped preferences `{rerank_flip:.2%}` of the time and reduced absolute margins by `{margin_drop:.3f}` on average.",
         f"- Semantic-consistency screening passed for {semantic_pass_rate:.2%} of perturbation pairs with mean hybrid semantic score `{mean_semantic_score:.3f}`.",
         "",
@@ -103,14 +107,14 @@ def render_markdown_report(
             "",
             "## Automated Exploit Search",
             "",
-            "| Source Model | Prompt | Gain | Semantic Score | Lexical | Embed Sim | Edit Ratio | Backend | Operations |",
+            "| Source Model | Prompt | Gain | Transfer | Semantic Score | Mutual Entailment | Candidates | Mode | Operations |",
             "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- |",
         ]
     )
     if attacks is not None:
         for _, row in attacks.sort_values("score_gain", ascending=False).head(10).iterrows():
             lines.append(
-                f"| {row['source_model']} | {row['prompt_id']} | {row['score_gain']:.3f} | {row['semantic_score']:.3f} | {row['lexical_overlap']:.3f} | {row['embedding_similarity']:.3f} | {row['edit_ratio']:.3f} | {row['semantic_backend']} | {row['applied_operations']} |"
+                f"| {row['source_model']} | {row['prompt_id']} | {row['score_gain']:.3f} | {row['transfer_gain']:.3f} | {row['semantic_score']:.3f} | {row['mutual_entailment_score']:.3f} | {int(row['evaluated_candidates'])} | {row['search_mode']} | {row['applied_operations']} |"
             )
 
     lines.extend(
@@ -141,6 +145,21 @@ def render_markdown_report(
         for _, row in defense_summary.iterrows():
             lines.append(
                 f"| {row['model_name']} | {row['mean_raw_gain']:.3f} | {row['mean_sanitized_gain']:.3f} | {row['mean_sanitization_drop']:.3f} | {row['positive_gain_retention']:.2%} | {row['mean_sanitized_overlap']:.3f} |"
+            )
+
+    lines.extend(
+        [
+            "",
+            "## Mitigation Loop",
+            "",
+            "| Model | Mean Raw Gain | Mean Mitigated Gain | Inflation Reduction | Success Before | Success After | Instability Reduction |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    if mitigation_summary is not None:
+        for _, row in mitigation_summary.iterrows():
+            lines.append(
+                f"| {row['model_name']} | {row['mean_raw_gain']:.3f} | {row['mean_mitigated_gain']:.3f} | {row['mean_inflation_reduction']:.3f} | {row['attack_success_rate_before']:.2%} | {row['attack_success_rate_after']:.2%} | {row['instability_reduction']:.2%} |"
             )
 
     lines.extend(

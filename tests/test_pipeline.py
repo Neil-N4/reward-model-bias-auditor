@@ -22,7 +22,12 @@ from reward_model_bias_auditor.analysis import (
 )
 from reward_model_bias_auditor.attack import search_reward_hack
 from reward_model_bias_auditor.benchmark import BASE_PROMPTS
-from reward_model_bias_auditor.defense import rerank_preferences, summarize_reranker
+from reward_model_bias_auditor.defense import (
+    build_mitigation_frame,
+    rerank_preferences,
+    summarize_mitigation,
+    summarize_reranker,
+)
 
 
 def test_benchmark_size_matches_expected_pair_count() -> None:
@@ -71,15 +76,24 @@ def test_attack_search_transferability_and_defense_frames_are_generated() -> Non
     )
     defense_summary = build_defense_summary(defense_frame)
     universal_cues = build_universal_cue_frame(attack_frame, transferability)
+    mitigation_frame = build_mitigation_frame(
+        attack_frame,
+        score_text=lambda model_name, task, response: score_text_offline(task, response, model_name),
+    )
+    mitigation_summary = summarize_mitigation(mitigation_frame)
 
     assert not attack_frame.empty
     assert attack_frame["score_gain"].max() > 0
+    assert "search_mode" in attack_frame.columns
+    assert attack_frame["search_mode"].eq("evolutionary").all()
     assert not transferability.empty
     assert "mean_transfer_gain" in transferability.columns
     assert not defense_summary.empty
     assert defense_summary["mean_sanitization_drop"].max() >= 0
     assert not universal_cues.empty
     assert "model_coverage" in universal_cues.columns
+    assert not mitigation_summary.empty
+    assert "instability_reduction" in mitigation_summary.columns
 
 
 def test_reranker_outputs_are_generated() -> None:

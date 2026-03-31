@@ -20,6 +20,8 @@ The project is designed around the kinds of failure modes that matter in post-tr
 - entailment-aware semantic filtering
 - mutual-entailment screening for stricter semantic preservation
 - universal cue analysis across discovered attacks
+- evolutionary exploit search under semantic constraints
+- mitigation-loop evaluation on discovered attacks
 - case-study export for discovered exploits
 
 ## What This Evaluates
@@ -39,7 +41,7 @@ The benchmark currently audits ten perturbation families:
 
 The `exploit_search` family is the most important one: it composes multiple high-reward surface cues into a single semantically preserving rewrite to test whether a model can be systematically “reward hacked.”
 
-On top of that fixed benchmark, the repo now includes a black-box search loop that optimizes for reward gain, transfer gain, semantic preservation, and edit efficiency while rejecting candidates that fail the semantic guard.
+On top of that fixed benchmark, the repo now includes a black-box evolutionary search loop that optimizes for reward gain, transfer gain, semantic preservation, and edit efficiency while rejecting candidates that fail the semantic guard.
 
 ## Headline Finding
 
@@ -104,6 +106,9 @@ The main outputs are:
 - `rank_flip_rate`
 - `mean_abs_margin_drop`
 - `mutual_entailment_score`
+- `mean_inflation_reduction`
+- `attack_success_rate_before`
+- `attack_success_rate_after`
 - `hybrid semantic score`
 - `embedding_similarity`
 - `entailment_score`
@@ -121,6 +126,7 @@ These metrics are meant to answer different questions:
 - Do they still mutually entail the original answer after checking both directions?
 - Does normalization remove the inflated preference signal?
 - Which surface cues survive across models often enough to look universal rather than model-local?
+- Does a mitigation filter actually reduce attack success on the discovered exploit set?
 
 ## System Design
 
@@ -195,7 +201,7 @@ Validated preset:
   - `OpenAssistant/reward-model-deberta-v3-base`
   - `OpenAssistant/reward-model-electra-large-discriminator`
 
-## Hybrid Semantic Guard
+## Hard Semantic Gate
 
 The semantic filter is stronger than the original lexical-overlap gate. It now combines:
 
@@ -206,7 +212,7 @@ The semantic filter is stronger than the original lexical-overlap gate. It now c
 - a contradiction heuristic
 - edit-budget thresholds
 
-The attack loop cannot keep a candidate unless it passes this guard.
+The attack loop cannot keep a candidate unless it passes this guard. In practice, the gate is bidirectional: high forward entailment is not enough if the rewritten answer fails to entail the original answer in reverse.
 
 ## Quickstart
 
@@ -235,6 +241,8 @@ This writes:
 - `outputs/transferability.csv`
 - `outputs/defense.csv`
 - `outputs/defense_summary.csv`
+- `outputs/mitigation.csv`
+- `outputs/mitigation_summary.csv`
 - `outputs/universal_cues.csv`
 - `outputs/reranker.csv`
 - `outputs/reranker_summary.csv`
@@ -260,14 +268,29 @@ This writes real-model outputs under `outputs/hf/`.
 The attack search loop treats the reward model as a black-box objective:
 
 1. start from a canonical answer
-2. expand a population of rewrite candidates
+2. mutate a candidate population with rewrite operators, crossover, and optional paraphrase-model proposals
 3. optimize for reward gain, transfer gain, semantic score, and edit efficiency
-4. reject candidates that violate hybrid semantic or edit-budget thresholds
-5. test the discovered exploit against other reward models
+4. reject candidates that violate hard semantic or edit-budget thresholds
+5. keep only the best-scoring survivors across generations
+6. test the discovered exploit against other reward models
 
 This turns the project from a static benchmark into a lightweight reward-hacking discovery engine.
 
 Optional generator-backed search is also supported through a paraphrase model, so the search loop can mix hand-designed rewrite operators with model-generated rewrites.
+
+## Mitigation Loop
+
+The repo also evaluates a simple robustness filter over the discovered attacks:
+
+1. take the highest-scoring exploit per prompt/model
+2. canonicalize away style, authority, citation, and formatting cues
+3. rescore the mitigated text
+4. measure:
+   - inflation reduction
+   - attack success before vs after mitigation
+   - instability reduction on the attack set
+
+This makes the project an attack-and-defense workflow rather than a pure audit.
 
 ## Case Study Export
 

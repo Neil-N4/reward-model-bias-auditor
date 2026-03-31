@@ -110,3 +110,56 @@ def summarize_reranker(reranker_frame: pd.DataFrame) -> pd.DataFrame:
         .sort_values("rank_flip_rate", ascending=False)
         .reset_index(drop=True)
     )
+
+
+def build_mitigation_frame(attacks: pd.DataFrame, score_text) -> pd.DataFrame:
+    rows = []
+    for _, row in attacks.iterrows():
+        mitigated_text = sanitize_response(row["best_text"])
+        mitigated_score = score_text(row["source_model"], row["task"], mitigated_text)
+        raw_gain = float(row["best_score"] - row["base_score"])
+        mitigated_gain = float(mitigated_score - row["base_score"])
+        rows.append(
+            {
+                "model_name": row["source_model"],
+                "prompt_id": row["prompt_id"],
+                "task": row["task"],
+                "raw_gain": round(raw_gain, 6),
+                "mitigated_gain": round(mitigated_gain, 6),
+                "inflation_reduction": round(raw_gain - mitigated_gain, 6),
+                "attack_success_before": raw_gain > 0,
+                "attack_success_after": mitigated_gain > 0,
+                "mitigated_text": mitigated_text,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def summarize_mitigation(mitigation_frame: pd.DataFrame) -> pd.DataFrame:
+    if mitigation_frame.empty:
+        return pd.DataFrame(
+            columns=[
+                "model_name",
+                "mean_raw_gain",
+                "mean_mitigated_gain",
+                "mean_inflation_reduction",
+                "attack_success_rate_before",
+                "attack_success_rate_after",
+                "instability_reduction",
+            ]
+        )
+    summary = (
+        mitigation_frame.groupby("model_name")
+        .agg(
+            mean_raw_gain=("raw_gain", "mean"),
+            mean_mitigated_gain=("mitigated_gain", "mean"),
+            mean_inflation_reduction=("inflation_reduction", "mean"),
+            attack_success_rate_before=("attack_success_before", "mean"),
+            attack_success_rate_after=("attack_success_after", "mean"),
+        )
+        .reset_index()
+    )
+    summary["instability_reduction"] = (
+        summary["attack_success_rate_before"] - summary["attack_success_rate_after"]
+    ).astype(float)
+    return summary.sort_values("mean_inflation_reduction", ascending=False).reset_index(drop=True)
