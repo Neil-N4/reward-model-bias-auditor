@@ -22,6 +22,7 @@ from reward_model_bias_auditor.analysis import (
     build_model_summary,
     build_semantic_consistency_frame,
     build_transferability_frame,
+    build_universal_cue_frame,
     pairs_to_frame,
     scores_to_frame,
 )
@@ -173,6 +174,7 @@ def main() -> None:
     )
     defense_summary = build_defense_summary(defense_frame)
     case_studies = build_case_study_frame(attack_frame, transferability, defense_frame)
+    universal_cues = build_universal_cue_frame(attack_frame, transferability)
     reranker = rerank_preferences(
         pairs_to_frame(pairs),
         score_text=lambda model_name, task, response: score_text_with_hf(
@@ -199,6 +201,7 @@ def main() -> None:
     defense_frame.to_csv(outputs / "defense.csv", index=False)
     defense_summary.to_csv(outputs / "defense_summary.csv", index=False)
     case_studies.to_csv(outputs / "case_studies.csv", index=False)
+    universal_cues.to_csv(outputs / "universal_cues.csv", index=False)
     reranker.to_csv(outputs / "reranker.csv", index=False)
     reranker_summary.to_csv(outputs / "reranker_summary.csv", index=False)
     render_markdown_report(
@@ -209,6 +212,8 @@ def main() -> None:
         attack_frame,
         transferability,
         defense_summary,
+        reranker_summary,
+        universal_cues,
         outputs / "report.md",
     )
     render_case_studies(case_studies, outputs / "CASE_STUDIES.md")

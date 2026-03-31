@@ -15,8 +15,11 @@ The project is designed around the kinds of failure modes that matter in post-tr
 - composite reward-hacking exploitability
 - cross-model exploit transfer
 - preference-signal collapse under input sanitization
+- canonicalization reranker flip rates and margin collapse
 - semantic-guard pass rates under hybrid lexical plus embedding checks
 - entailment-aware semantic filtering
+- mutual-entailment screening for stricter semantic preservation
+- universal cue analysis across discovered attacks
 - case-study export for discovered exploits
 
 ## What This Evaluates
@@ -98,6 +101,9 @@ The main outputs are:
 - `mean_transfer_gain`
 - `transfer_success_rate`
 - `mean_sanitization_drop`
+- `rank_flip_rate`
+- `mean_abs_margin_drop`
+- `mutual_entailment_score`
 - `hybrid semantic score`
 - `embedding_similarity`
 - `entailment_score`
@@ -112,7 +118,9 @@ These metrics are meant to answer different questions:
 - Did the rewrites preserve content well enough to make the result meaningful?
 - Do attacks found on one reward model transfer to another?
 - Do those rewrites still entail the original answer?
+- Do they still mutually entail the original answer after checking both directions?
 - Does normalization remove the inflated preference signal?
+- Which surface cues survive across models often enough to look universal rather than model-local?
 
 ## System Design
 
@@ -149,6 +157,8 @@ flowchart LR
 - 10 perturbation families
 - 10 perturbation instances per prompt
 - 500 paired comparisons in the offline demo
+
+The full offline benchmark is 500 pairs. The default `scripts/run_demo.py` path uses a small smoke-test sample for faster CPU turnaround on machines without GPU acceleration, while preserving the same evaluation logic.
 
 That keeps the benchmark small enough to inspect manually while still producing stable model-by-bias comparisons.
 
@@ -191,7 +201,8 @@ The semantic filter is stronger than the original lexical-overlap gate. It now c
 
 - lexical overlap
 - MiniLM embedding similarity when available
-- MNLI-style entailment scoring when available
+- MNLI-style forward and reverse entailment scoring when available
+- mutual-entailment thresholds for stricter semantic preservation
 - a contradiction heuristic
 - edit-budget thresholds
 
@@ -207,6 +218,12 @@ source .venv/bin/activate
 MPLCONFIGDIR=$PWD/.mplconfig python scripts/run_demo.py
 ```
 
+Full-size offline run:
+
+```bash
+MPLCONFIGDIR=$PWD/.mplconfig python scripts/run_demo.py --repeats-per-prompt 10
+```
+
 This writes:
 
 - `outputs/pairs.csv`
@@ -218,6 +235,9 @@ This writes:
 - `outputs/transferability.csv`
 - `outputs/defense.csv`
 - `outputs/defense_summary.csv`
+- `outputs/universal_cues.csv`
+- `outputs/reranker.csv`
+- `outputs/reranker_summary.csv`
 - `outputs/case_studies.csv`
 - `outputs/CASE_STUDIES.md`
 - `outputs/report.md`

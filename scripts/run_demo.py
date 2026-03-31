@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 import sys
 
@@ -26,6 +27,7 @@ from reward_model_bias_auditor.analysis import (
     build_model_summary,
     build_semantic_consistency_frame,
     build_transferability_frame,
+    build_universal_cue_frame,
     pairs_to_frame,
     scores_to_frame,
 )
@@ -43,10 +45,22 @@ from reward_model_bias_auditor.plotting import (
 from reward_model_bias_auditor.semantic import SemanticEvaluator
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run the offline reward-model bias auditor.")
+    parser.add_argument(
+        "--repeats-per-prompt",
+        type=int,
+        default=1,
+        help="Number of perturbation instances per prompt to include in the demo run.",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
+    args = parse_args()
     semantic_evaluator = SemanticEvaluator(allow_download=True)
-    paraphrase_generator = ParaphraseGenerator(allow_download=True)
-    pairs = build_benchmark(repeats_per_prompt=10)
+    paraphrase_generator = ParaphraseGenerator(allow_download=False)
+    pairs = build_benchmark(repeats_per_prompt=args.repeats_per_prompt)
     scores = score_pairs(pairs)
     summary = analyze_scores(scores)
     attributions = build_attribution_frame(scores)
@@ -82,6 +96,7 @@ def main() -> None:
     defense_summary = build_defense_summary(defense_frame)
     case_studies = build_case_study_frame(attack_frame, transferability, defense_frame)
     pairs_frame = pairs_to_frame(pairs)
+    universal_cues = build_universal_cue_frame(attack_frame, transferability)
     reranker = rerank_preferences(
         pairs_frame,
         score_text=lambda model_name, task, response: score_text_offline(task, response, model_name),
@@ -104,6 +119,7 @@ def main() -> None:
     defense_frame.to_csv(outputs / "defense.csv", index=False)
     defense_summary.to_csv(outputs / "defense_summary.csv", index=False)
     case_studies.to_csv(outputs / "case_studies.csv", index=False)
+    universal_cues.to_csv(outputs / "universal_cues.csv", index=False)
     reranker.to_csv(outputs / "reranker.csv", index=False)
     reranker_summary.to_csv(outputs / "reranker_summary.csv", index=False)
     render_markdown_report(
@@ -114,6 +130,8 @@ def main() -> None:
         attack_frame,
         transferability,
         defense_summary,
+        reranker_summary,
+        universal_cues,
         outputs / "report.md",
     )
     render_case_studies(case_studies, outputs / "CASE_STUDIES.md")

@@ -13,6 +13,8 @@ def render_markdown_report(
     attacks: pd.DataFrame | None,
     transferability: pd.DataFrame | None,
     defense_summary: pd.DataFrame | None,
+    reranker_summary: pd.DataFrame | None,
+    universal_cues: pd.DataFrame | None,
     output_path: Path,
 ) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -30,9 +32,14 @@ def render_markdown_report(
     mean_semantic_score = float(semantic_consistency["semantic_score_min"].mean())
     mean_embedding_similarity = float(semantic_consistency["embedding_similarity_a"].add(semantic_consistency["embedding_similarity_b"]).mean() / 2)
     mean_entailment_score = float(semantic_consistency["entailment_score_a"].add(semantic_consistency["entailment_score_b"]).mean() / 2)
+    mean_mutual_entailment = float(
+        semantic_consistency["mutual_entailment_score_a"].add(semantic_consistency["mutual_entailment_score_b"]).mean() / 2
+    )
     attack_gain = 0.0 if attacks is None or attacks.empty else float(attacks["score_gain"].mean())
     transfer_gain = 0.0 if transferability is None or transferability.empty else float(transferability["mean_transfer_gain"].mean())
     defense_drop = 0.0 if defense_summary is None or defense_summary.empty else float(defense_summary["mean_sanitization_drop"].mean())
+    rerank_flip = 0.0 if reranker_summary is None or reranker_summary.empty else float(reranker_summary["rank_flip_rate"].mean())
+    margin_drop = 0.0 if reranker_summary is None or reranker_summary.empty else float(reranker_summary["mean_abs_margin_drop"].mean())
 
     top_tokens = (
         attributions.groupby(["bias_dimension", "token"])["attribution_delta"]
@@ -57,6 +64,7 @@ def render_markdown_report(
         f"- Automated exploit search increased scores by an average of `{attack_gain:.3f}` while keeping semantic-consistency constraints active.",
         f"- Cross-model transfer produced mean attack gain `{transfer_gain:.3f}`, showing whether hacks stay local or generalize.",
         f"- Sanitization dropped exploit scores by `{defense_drop:.3f}` on average, which turns the repo into an audit-plus-defense workflow.",
+        f"- Canonicalization reranking flipped preferences `{rerank_flip:.2%}` of the time and reduced absolute margins by `{margin_drop:.3f}` on average.",
         f"- Semantic-consistency screening passed for {semantic_pass_rate:.2%} of perturbation pairs with mean hybrid semantic score `{mean_semantic_score:.3f}`.",
         "",
         "## Threat Model",
@@ -138,6 +146,36 @@ def render_markdown_report(
     lines.extend(
         [
             "",
+            "## Canonicalization Reranker",
+            "",
+            "| Model | Rank-Flip Rate | Mean Absolute Margin Drop |",
+            "| --- | ---: | ---: |",
+        ]
+    )
+    if reranker_summary is not None:
+        for _, row in reranker_summary.iterrows():
+            lines.append(
+                f"| {row['model_name']} | {row['rank_flip_rate']:.2%} | {row['mean_abs_margin_drop']:.3f} |"
+            )
+
+    lines.extend(
+        [
+            "",
+            "## Universal Cue Analysis",
+            "",
+            "| Cue | Attack Count | Model Coverage | Mean Gain | Mean Transfer Gain | Mean Transfer Success |",
+            "| --- | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    if universal_cues is not None:
+        for _, row in universal_cues.head(8).iterrows():
+            lines.append(
+                f"| {row['cue']} | {int(row['attack_count'])} | {int(row['model_coverage'])} | {row['mean_score_gain']:.3f} | {row['mean_transfer_gain']:.3f} | {row['mean_transfer_success_rate']:.2%} |"
+            )
+
+    lines.extend(
+        [
+            "",
             "## Semantic-Consistency Gate",
             "",
             "| Metric | Value |",
@@ -147,6 +185,7 @@ def render_markdown_report(
             f"| Mean minimum semantic score | {mean_semantic_score:.3f} |",
             f"| Mean embedding similarity | {mean_embedding_similarity:.3f} |",
             f"| Mean entailment score | {mean_entailment_score:.3f} |",
+            f"| Mean mutual entailment score | {mean_mutual_entailment:.3f} |",
             f"| Pass rate | {semantic_pass_rate:.2%} |",
             "",
             "## Attribution Snapshot",

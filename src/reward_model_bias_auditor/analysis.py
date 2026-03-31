@@ -65,12 +65,17 @@ def build_semantic_consistency_frame(
                 "semantic_score_b": round(check_b.semantic_score, 4),
                 "entailment_score_a": round(check_a.entailment_score, 4),
                 "entailment_score_b": round(check_b.entailment_score, 4),
+                "reverse_entailment_score_a": round(check_a.reverse_entailment_score, 4),
+                "reverse_entailment_score_b": round(check_b.reverse_entailment_score, 4),
+                "mutual_entailment_score_a": round(check_a.mutual_entailment_score, 4),
+                "mutual_entailment_score_b": round(check_b.mutual_entailment_score, 4),
                 "contradiction_score_a": round(check_a.contradiction_score, 4),
                 "contradiction_score_b": round(check_b.contradiction_score, 4),
                 "contradiction_a": check_a.contradiction_flag,
                 "contradiction_b": check_b.contradiction_flag,
                 "semantic_overlap_min": round(min(check_a.lexical_overlap, check_b.lexical_overlap), 4),
                 "semantic_score_min": round(min(check_a.semantic_score, check_b.semantic_score), 4),
+                "mutual_entailment_min": round(min(check_a.mutual_entailment_score, check_b.mutual_entailment_score), 4),
                 "semantic_backend": check_a.backend if check_a.backend == check_b.backend else "mixed",
                 "semantic_pass": bool(check_a.passed and check_b.passed),
             }
@@ -249,6 +254,60 @@ def build_reranker_case_signal(reranker_summary: pd.DataFrame) -> float:
     return float(
         reranker_summary["rank_flip_rate"].mean() + reranker_summary["mean_abs_margin_drop"].mean()
     )
+
+
+def build_universal_cue_frame(attacks: pd.DataFrame, transferability: pd.DataFrame) -> pd.DataFrame:
+    if attacks.empty:
+        return pd.DataFrame(
+            columns=[
+                "cue",
+                "attack_count",
+                "model_coverage",
+                "mean_score_gain",
+                "mean_transfer_gain",
+                "mean_transfer_success_rate",
+            ]
+        )
+    transfer_summary = (
+        transferability.groupby("source_model")
+        .agg(
+            mean_transfer_gain=("mean_transfer_gain", "mean"),
+            mean_transfer_success_rate=("transfer_success_rate", "mean"),
+        )
+        .reset_index()
+    )
+    expanded = attacks.copy()
+    expanded["cue"] = expanded["applied_operations"].fillna("").str.split(",")
+    expanded = expanded.explode("cue")
+    expanded["cue"] = expanded["cue"].fillna("").str.strip()
+    expanded = expanded[expanded["cue"] != ""]
+    if expanded.empty:
+        return pd.DataFrame(
+            columns=[
+                "cue",
+                "attack_count",
+                "model_coverage",
+                "mean_score_gain",
+                "mean_transfer_gain",
+                "mean_transfer_success_rate",
+            ]
+        )
+    expanded = expanded.merge(transfer_summary, left_on="source_model", right_on="source_model", how="left")
+    universal = (
+        expanded.groupby("cue")
+        .agg(
+            attack_count=("cue", "size"),
+            model_coverage=("source_model", "nunique"),
+            mean_score_gain=("score_gain", "mean"),
+            mean_transfer_gain=("mean_transfer_gain", "mean"),
+            mean_transfer_success_rate=("mean_transfer_success_rate", "mean"),
+        )
+        .reset_index()
+    )
+    return universal.sort_values(
+        ["model_coverage", "mean_transfer_gain", "mean_score_gain"],
+        ascending=[False, False, False],
+    ).reset_index(drop=True)
 
 
 def build_case_study_frame(

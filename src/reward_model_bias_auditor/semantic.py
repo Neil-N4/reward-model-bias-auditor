@@ -10,6 +10,8 @@ class SemanticCheck:
     lexical_overlap: float
     embedding_similarity: float
     entailment_score: float
+    reverse_entailment_score: float
+    mutual_entailment_score: float
     contradiction_score: float
     contradiction_flag: bool
     semantic_score: float
@@ -128,6 +130,8 @@ class SemanticEvaluator:
         embedding = 0.0
         backend = "lexical"
         entailment_score = 0.0
+        reverse_entailment_score = 0.0
+        mutual_entailment_score = 0.0
         contradiction_score = 0.0
         try:
             embedding = round(self._embedding_similarity(reference, candidate), 4)
@@ -138,16 +142,29 @@ class SemanticEvaluator:
             backend = "lexical"
         try:
             entailment_score, contradiction_score = self._nli_scores(reference, candidate)
+            reverse_entailment_score, reverse_contradiction_score = self._nli_scores(candidate, reference)
             entailment_score = round(entailment_score, 4)
+            reverse_entailment_score = round(reverse_entailment_score, 4)
+            mutual_entailment_score = round(min(entailment_score, reverse_entailment_score), 4)
             contradiction_score = round(contradiction_score, 4)
-            if entailment_score > 0 or contradiction_score > 0:
+            contradiction_score = round(max(contradiction_score, reverse_contradiction_score), 4)
+            if entailment_score > 0 or reverse_entailment_score > 0 or contradiction_score > 0:
                 backend = "hybrid+nli" if backend == "hybrid" else "nli"
         except Exception:
             entailment_score = 0.0
+            reverse_entailment_score = 0.0
+            mutual_entailment_score = 0.0
             contradiction_score = 0.0
         length_ratio = min(len(reference), len(candidate)) / max(1, max(len(reference), len(candidate)))
         if "nli" in backend:
-            score = round((0.25 * lexical) + (0.3 * embedding) + (0.3 * entailment_score) + (0.15 * length_ratio), 4)
+            score = round(
+                (0.2 * lexical)
+                + (0.25 * embedding)
+                + (0.2 * entailment_score)
+                + (0.2 * mutual_entailment_score)
+                + (0.15 * length_ratio),
+                4,
+            )
         elif backend == "hybrid":
             score = round((0.4 * lexical) + (0.5 * embedding) + (0.1 * length_ratio), 4)
         else:
@@ -157,13 +174,15 @@ class SemanticEvaluator:
         passed = (
             lexical >= min(0.22, self.min_lexical_overlap)
             and score >= threshold
-            and entailment_score >= (0.45 if "nli" in backend else 0.0)
+            and mutual_entailment_score >= (0.4 if "nli" in backend else 0.0)
             and not contradiction
         )
         return SemanticCheck(
             lexical_overlap=lexical,
             embedding_similarity=embedding,
             entailment_score=entailment_score,
+            reverse_entailment_score=reverse_entailment_score,
+            mutual_entailment_score=mutual_entailment_score,
             contradiction_score=contradiction_score,
             contradiction_flag=contradiction,
             semantic_score=score,

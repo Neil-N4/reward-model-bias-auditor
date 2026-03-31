@@ -18,6 +18,7 @@ from reward_model_bias_auditor.analysis import (
     build_model_summary,
     build_semantic_consistency_frame,
     build_transferability_frame,
+    build_universal_cue_frame,
 )
 from reward_model_bias_auditor.attack import search_reward_hack
 from reward_model_bias_auditor.benchmark import BASE_PROMPTS
@@ -47,6 +48,7 @@ def test_semantic_gate_and_model_summary_are_generated() -> None:
 
     assert semantic["semantic_pass"].mean() >= 0.9
     assert "exploitability_ratio" in model_summary.columns
+    assert "mutual_entailment_min" in semantic.columns
 
 
 def test_attack_search_transferability_and_defense_frames_are_generated() -> None:
@@ -68,6 +70,7 @@ def test_attack_search_transferability_and_defense_frames_are_generated() -> Non
         score_text=lambda model_name, task, response: score_text_offline(task, response, model_name),
     )
     defense_summary = build_defense_summary(defense_frame)
+    universal_cues = build_universal_cue_frame(attack_frame, transferability)
 
     assert not attack_frame.empty
     assert attack_frame["score_gain"].max() > 0
@@ -75,6 +78,8 @@ def test_attack_search_transferability_and_defense_frames_are_generated() -> Non
     assert "mean_transfer_gain" in transferability.columns
     assert not defense_summary.empty
     assert defense_summary["mean_sanitization_drop"].max() >= 0
+    assert not universal_cues.empty
+    assert "model_coverage" in universal_cues.columns
 
 
 def test_reranker_outputs_are_generated() -> None:
